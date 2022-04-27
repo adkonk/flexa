@@ -5,146 +5,46 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 import networkx as nx
-from scipy.spatial import Voronoi, voronoi_plot_2d
+from scipy.spatial import Voronoi, Delaunay, voronoi_plot_2d
 from scipy.optimize import minimize
 import time
 
 #%% class definition
 
 class FlexaSheet(object):
-	def __init__(self, x0: np.ndarray, phi0=None, psi0=None, ell0=None,
+	def __init__(self, G, phi0=None, psi0=None, ell0=None,
 				 constrained=False):
 		""" Generates the FlexaSheet object
 		Parameters:
-			x0: initial (n, 2) or (n, 3) array of cell coordinates
+			G: networkx graph
 		"""
 		
-		if x0.shape[1] == 2 or (x0.shape[1] == 3 and np.all(x0[:, 2] == 0)):
-			if x0.shape[1] == 2:
-				x0 = np.concatenate((x0, np.zeros((x0.shape[0], 1))), axis=1)
-			
-			vor = Voronoi(x0[:, :2])
-			collars = np.concatenate((vor.vertices, 
-									  np.ones((vor.vertices.shape[0], 1))),
-						 axis=1)
-			
-			G = nx.Graph()
-			# add cell vertices
-			G.add_nodes_from([(i, {'x0': x0[i, :], 'cell': True}) 
-				for i in range(self.n_cells)])
-		
-			# add collar vertices
-			G.add_nodes_from(
-					[(i + self.n_cells, {'x0': collars[i, :], 'cell': False}) 
-					 for i in range(collars.shape[0])])  
-	
-			pos = nx.get_node_attributes(G, 'x0')
+		self.G = G
 
-			bad_edges1 = []
-			bad_edges2 = []
-			new_nodes = 0
-			for i in range(len(vor.ridge_points)):
-				cells = vor.ridge_points[i, :]
-				verts = vor.ridge_vertices[i]
-				  
-				# make cell-collar edges
-				if verts[0] != -1 and verts[1] != -1:
-					G.add_edge(cells[0], verts[0] + self.n_cells, collar=True)
-					G.add_edge(cells[1], verts[0] + self.n_cells, collar=True)
-					
-					G.add_edge(cells[0], verts[1] + self.n_cells, collar=True)
-					G.add_edge(cells[1], verts[1] + self.n_cells, collar=True)
-					  
-					G.add_edge(cells[0], cells[1], collar=False, 
-							   collar_pts=[verts[0] + self.n_cells, 
-										   verts[1] + self.n_cells])
-				if verts[0] == -1:
-					bad_edges1.append([cells, verts])
-					new_nodes += 1
-				if verts[1] == -1:
-					bad_edges2.append([cells, verts])
-					new_nodes += 1
-			
-			# place collars at center of mass of their cells
-			# before we add collars on the outside of the sheet
-			cell_booleans = nx.get_node_attributes(G, 'cell')
-			for (i, b) in cell_booleans.items():
-				if not b:
-					pos[i] = np.mean([pos[j] for j in G[i]], axis=0) + \
-						np.array([0, 0, 1])
-			nx.set_node_attributes(G, pos, 'x0')
-			
-			for (cells, verts) in bad_edges1:
-				# make a new collar node equally distant as the existing collar 
-				# node
-				# find vector to existing collar node
-				dirr = pos[verts[1] + self.n_cells] - pos[cells[0]]
-				
-				# find vector between cells
-				center_line = pos[cells[1]] - pos[cells[0]]
-				# find orthogonal component of dir on center_line
-				dirr -= center_line * np.dot(dirr, center_line) / \
-					np.dot(center_line, center_line)
-				dirr *= np.array([1, 1, -1])
-				
-				new_node = G.number_of_nodes()
-				G.add_node(new_node, x0=(pos[cells[0]] + 
-										 pos[cells[1]]) / 2 - dirr, 
-						   cell=False)
-				G.add_edge(cells[0], new_node, collar=True)
-				G.add_edge(cells[1], new_node, collar=True)
-				
-				G.add_edge(cells[0], cells[1], collar=False,
-						   collar_pts=[verts[1] + self.n_cells, new_node])
-			  
-			for (cells, verts) in bad_edges2:
-				dirr = pos[verts[0] + self.n_cells] - pos[cells[0]]
-			
-				center_line = pos[cells[1]] - pos[cells[0]]
-				dirr -= center_line * np.dot(dirr, center_line) / \
-					np.dot(center_line, center_line)
-				dirr *= np.array([1, 1, -1])
-
-				new_node = G.number_of_nodes()
-				G.add_node(new_node, x0=(pos[cells[0]] + 
-										 pos[cells[1]]) / 2 + dirr, 
-						   cell=False)
-				G.add_edge(cells[0], new_node, collar=True)
-				G.add_edge(cells[1], new_node, collar=True)
-
-				G.add_edge(cells[0], cells[1], collar=False,
-						   collar_pts=[verts[0] + self.n_cells, new_node])
-				
-			self.G = G
-			
-			# dict {cell: [cell collar nodes]}
-			self.cell_collars = {}
-			for i in range(self.n_cells):
-				self.cell_collars[i] = [k for (k, v) in G[i].items() \
-								 if v['collar']]
-			 
-			# dict {(cell1, cell2): (collar node 1, collar node 2)}
-			self.neigh_collars = nx.get_edge_attributes(G, 'collar_pts')
-			
-			# list of (cell, collar node) or (collar node, cell)
-			self.collar_edges = np.array(
-				[(e[0], e[1]) for e in self.G.edges.data('collar') if e[2]])
-			
-			# TODO: fix the startup message
-			print('%d cell-cell interactions \n' % len(G.edges) + \
-				  '%d boundary collar nodes' % len(G.edges))
-			
-		elif x0.shape[1] == 3:
-			raise NotImplementedError('3d starting coordinates ' + \
-				  'not yet implemented!')
-		else:
-			raise NotImplementedError('?')
-		
 		pos = nx.get_node_attributes(G, 'x0')
 		self.x = np.array(list(pos.values())).flatten()
 		r = self.x.reshape((-1, 3))
-		
 		self.n = r.shape[0]
+
+		# number of cells
+		self.n_cells = sum(nx.get_node_attributes(self.G, 'cell').values())
+
+		# dict {cell: [cell collar nodes]}
+		self.cell_collars = {}
+		for i in range(self.n_cells):
+			self.cell_collars[i] = [k for (k, v) in G[i].items() \
+								if v['collar']]
+
+		# dict {(cell1, cell2): (collar node 1, collar node 2)}
+		self.neigh_collars = nx.get_edge_attributes(G, 'collar_pts')
+		
+		# list of (cell, collar node) or (collar node, cell)
+		self.collar_edges = np.array(
+			[(e[0], e[1]) for e in self.G.edges.data('collar') if e[2]])
+		
+		# TODO: fix the startup message
+		print('%d cell-cell interactions \n' % len(G.edges) + \
+				'%d boundary collar nodes' % len(G.edges))
 		
 		if phi0 is None:
 			self.phi0 = self.aphi(r)
@@ -164,7 +64,204 @@ class FlexaSheet(object):
 		self.energy_stats(r)
 		print('\nInitial geometry:')
 		self.geom_stats(r)
+
+	@classmethod
+	def flatgen(cls, x0, phi0=None, psi0=None, ell0=None, constrained=False):
+		assert x0.shape[1] == 2 or (x0.shape[1] == 3 and np.all(x0[:, 2] == 0))
+		
+		if x0.shape[1] == 2:
+			x0 = np.concatenate((x0, np.zeros((x0.shape[0], 1))), axis=1)
+		
+		n_cells = x0.shape[0]
+
+		vor = Voronoi(x0[:, :2])
+		collars = np.concatenate((vor.vertices, 
+									np.ones((vor.vertices.shape[0], 1))),
+						axis=1)
+		
+		G = nx.Graph()
+		# add cell vertices
+		G.add_nodes_from([(i, {'x0': x0[i, :], 'cell': True}) 
+			for i in range(n_cells)])
 	
+		# add collar vertices
+		G.add_nodes_from(
+				[(i + n_cells, {'x0': collars[i, :], 'cell': False}) 
+					for i in range(collars.shape[0])])  
+
+		pos = nx.get_node_attributes(G, 'x0')
+
+		bad_edges1 = []
+		bad_edges2 = []
+		new_nodes = 0
+		for i in range(len(vor.ridge_points)):
+			cells = vor.ridge_points[i, :]
+			verts = vor.ridge_vertices[i]
+				
+			# make cell-collar edges
+			if verts[0] != -1 and verts[1] != -1:
+				G.add_edge(cells[0], verts[0] + n_cells, collar=True)
+				G.add_edge(cells[1], verts[0] + n_cells, collar=True)
+				
+				G.add_edge(cells[0], verts[1] + n_cells, collar=True)
+				G.add_edge(cells[1], verts[1] + n_cells, collar=True)
+					
+				G.add_edge(cells[0], cells[1], collar=False, 
+							collar_pts=[verts[0] + n_cells, 
+										verts[1] + n_cells])
+			if verts[0] == -1:
+				bad_edges1.append([cells, verts])
+				new_nodes += 1
+			if verts[1] == -1:
+				bad_edges2.append([cells, verts])
+				new_nodes += 1
+		
+		# place collars at center of mass of their cells
+		# before we add collars on the outside of the sheet
+		cell_booleans = nx.get_node_attributes(G, 'cell')
+		for (i, b) in cell_booleans.items():
+			if not b:
+				pos[i] = np.mean([pos[j] for j in G[i]], axis=0) + \
+					np.array([0, 0, 1])
+		nx.set_node_attributes(G, pos, 'x0')
+		
+		for (cells, verts) in bad_edges1:
+			# make a new collar node equally distant as the existing collar 
+			# node
+			# find vector to existing collar node
+			dirr = pos[verts[1] + n_cells] - pos[cells[0]]
+			
+			# find vector between cells
+			center_line = pos[cells[1]] - pos[cells[0]]
+			# find orthogonal component of dir on center_line
+			dirr -= center_line * np.dot(dirr, center_line) / \
+				np.dot(center_line, center_line)
+			dirr *= np.array([1, 1, -1])
+			
+			new_node = G.number_of_nodes()
+			G.add_node(new_node, x0=(pos[cells[0]] + 
+										pos[cells[1]]) / 2 - dirr, 
+						cell=False)
+			G.add_edge(cells[0], new_node, collar=True)
+			G.add_edge(cells[1], new_node, collar=True)
+			
+			G.add_edge(cells[0], cells[1], collar=False,
+						collar_pts=[verts[1] + n_cells, new_node])
+			
+		for (cells, verts) in bad_edges2:
+			dirr = pos[verts[0] + n_cells] - pos[cells[0]]
+		
+			center_line = pos[cells[1]] - pos[cells[0]]
+			dirr -= center_line * np.dot(dirr, center_line) / \
+				np.dot(center_line, center_line)
+			dirr *= np.array([1, 1, -1])
+
+			new_node = G.number_of_nodes()
+			G.add_node(new_node, x0=(pos[cells[0]] + 
+										pos[cells[1]]) / 2 + dirr, 
+						cell=False)
+			G.add_edge(cells[0], new_node, collar=True)
+			G.add_edge(cells[1], new_node, collar=True)
+
+			G.add_edge(cells[0], cells[1], collar=False,
+						collar_pts=[verts[0] + n_cells, new_node])
+
+		return(cls(G, phi0, psi0, ell0, constrained))
+
+	@classmethod
+	def facegen(cls, x0, faces, phi0=None, psi0=None, ell0=None,
+				constrained=False):
+		G = FlexaSheet.cellgraph(x0)
+
+		neigh_collars = dict()
+		def sortkey(i, j):
+			assert i != j
+			return(min(i, j), max(i, j))
+
+		for (i, j) in zip(faces[:, 0], faces[:, 1]):
+			neigh_collars[sortkey(i, j)] = []
+		for (i, j) in zip(faces[:, 1], faces[:, 2]):
+			neigh_collars[sortkey(i, j)] = []
+		for (i, j) in zip(faces[:, 2], faces[:, 0]):
+			neigh_collars[sortkey(i, j)] = []
+		
+		if np.all(np.equal([len(f) for f in faces], 3)):
+			normfunc = FlexaSheet.tri_normal
+		else: 
+			normfunc = FlexaSheet.face_normal
+
+		if ell0 is None:
+			ell0 = 1
+
+		edge_perps = dict()
+
+		for f in faces:
+			# TODO: add argument to make ref point towards the origin
+			# for every face
+			ref = np.array([0, 0, 1])
+			n = normfunc(x0[f, :], ref=ref)
+			x = np.mean(x0[f, :], axis=0) + ell0 * n
+
+			edge_perps[sortkey(f[0], f[1])] = n
+			edge_perps[sortkey(f[1], f[2])] = n
+			edge_perps[sortkey(f[2], f[0])] = n
+
+			new_node = G.number_of_nodes()
+			G.add_node(new_node, x0=x, cell=False)
+
+			G.add_edge(f[0], new_node, collar=True)
+			G.add_edge(f[1], new_node, collar=True)
+			G.add_edge(f[2], new_node, collar=True)
+
+			neigh_collars[sortkey(f[0], f[1])].append(new_node)
+			neigh_collars[sortkey(f[1], f[2])].append(new_node)
+			neigh_collars[sortkey(f[2], f[0])].append(new_node)
+
+		pos = nx.get_node_attributes(G, 'x0')
+
+		for (k, v) in neigh_collars.items():
+			assert len(v) > 0 and len(v) <= 2
+			i = k[0]
+			j = k[1]
+			if len(v) == 1:
+				new_node = G.number_of_nodes()
+				x = pos[v[0]] # existing collar position
+
+				n = edge_perps[k] # normal of the face edge k is part of 
+				ab = pos[i] - pos[j] # vector of edge k
+				m = np.cross(ab, n) # normal vector of plane given by ab, n
+				k = np.dot(m, pos[i]) # offset when ab, n plane is given 
+									  # m dot y = k
+
+				c = (k - np.dot(m, x)) / np.dot(m, m) # closest point on ab, n
+													  # plane to x is given
+													  # by x + cm
+
+				G.add_node(new_node, x0=(x + 2 * c * m), cell=False)
+				G.add_edge(i, new_node, collar=True)
+				G.add_edge(j, new_node, collar=True)
+				v.append(new_node)
+
+			G.add_edge(i, j, collar=False, collar_pts=v)
+
+		return(cls(G, phi0, psi0, ell0, constrained))
+
+	@classmethod
+	def trisurfgen(cls, x0, phi0=None, psi0=None, ell0=None, constrained=False):
+		G = cellgraph(x0)
+		tri = Delaunay(x0)
+
+		# TODO: implement
+		raise NotImplementedError('not done yet')
+
+	@staticmethod
+	def cellgraph(x0):
+		G = nx.Graph()
+		# add cell vertices
+		G.add_nodes_from([(i, {'x0': x0[i, :], 'cell': True}) 
+			for i in range(x0.shape[0])])
+		return(G)
+
 	def collar_pairs(self, ):
 		collar_pairs = zip(list(self.neigh_collars.values()))
 		collar_pairs = np.array(list(collar_pairs)).flatten().reshape(-1, 2)
@@ -199,25 +296,42 @@ class FlexaSheet(object):
 	def angle(a, b):
 		return(np.arccos(np.dot(a, b) / np.linalg.norm(a) / np.linalg.norm(b)))
 	
-	def cell_normal(self, r, cell):
-		rcis = r[self.cell_collars[cell], :]
-		rc = r[cell, :]
+	@staticmethod 
+	def tri_normal(a: np.ndarray, b=None, c=None, ref=np.array([0, 0, 1])):
+		if a.shape[1] == 2: return ref 
+
+		if b is None and c is None:
+			assert a.shape[0] == 3
+			b = a[1, :]
+			c = a[2, :]
+			a = a[0, :]
 		
+		n = np.cross(b - a, c - a)
+		n /= np.linalg.norm(n)
+		if np.dot(n, ref) < 0:
+			n *= -1
+		return(n)
+	
+	@staticmethod
+	def face_normal(r, ref=np.array([0, 0, 1])):
 		# solve least squares approximation z_i = (x_i, y_i) * (v_1, v_2) + c
 		# so then the normal vector for plane is (v_1, v_2, -1)
-		x = np.concatenate((rcis[:, :2], np.ones((rcis.shape[0], 1))), 
+		x = np.concatenate((r[:, :2], np.ones((r.shape[0], 1))), 
 						   axis = 1)
-		v = np.linalg.inv(x.T @ x) @ x.T @ rcis[:, [2]]
+		v = np.linalg.inv(x.T @ x) @ x.T @ r[:, [2]]
 		v = np.array([v[0, 0], v[1, 0], -1])
 	
-		# but we don't know the orientation of the normal vector.
-		# here we could use the average cell-to-collar vector to fix the 
-		# orientation
-		to_collar = np.sum(rcis - rc, axis=0)
-		if np.dot(v, to_collar) < 0:
+		v /= np.linalg.norm(v)
+
+		if np.dot(v, ref) < 0:
 		  return(-1 * v)
 		else:
 		  return(v)
+
+	def cell_normal(self, r, cell):
+		rcis = r[self.cell_collars[cell], :]
+		rc = r[cell, :]
+		return(FlexaSheet.face_normal(rcis, np.sum(rcis - rc, axis=0)))
 	
 	# calculating the energies
 	def phis(self, r):
@@ -415,7 +529,7 @@ class FlexaSheet(object):
 			ax.add_collection3d(c)
 			
 			ax.view_init(10, 20)
-			ax.set_zlim(-1, 2) 
+			# ax.set_zlim(-1, 2) 
 			
 			ax = fig.add_subplot(1, 2, 2, projection='3d')
 			c = Line3DCollection(
@@ -434,7 +548,7 @@ class FlexaSheet(object):
 						 r[self.n_cells:, 2])
 			
 			ax.view_init(40, 20)
-			ax.set_zlim(-1, 2) 
+			# ax.set_zlim(-1, 2) 
 			
 			plt.tight_layout()
 		# TODO: add plotter showing phi energy at each cell and 
