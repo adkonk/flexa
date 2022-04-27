@@ -1,6 +1,3 @@
-# -*- coding: utf-8 -*-
-#%% imports
-
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
@@ -8,8 +5,6 @@ import networkx as nx
 from scipy.spatial import Voronoi, Delaunay, voronoi_plot_2d
 from scipy.optimize import minimize
 import time
-
-#%% class definition
 
 class FlexaSheet(object):
 	def __init__(self, G, phi0=None, psi0=None, ell0=None,
@@ -553,9 +548,3 @@ class FlexaSheet(object):
 			plt.tight_layout()
 		# TODO: add plotter showing phi energy at each cell and 
 		# psi energy at each boundary
-
-#%% test script
-		
-if __name__ == '__main__':
-	print('test')
-	

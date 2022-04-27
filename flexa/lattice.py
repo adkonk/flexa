@@ -1,13 +1,9 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import rankdata
 
 from FlexaSheet import FlexaSheet
 from icosphere import icosphere 
-
-#%% start functions
 
 def hex_lattice():
     n_steps = 11 # how many flexas to put in interval [-10, 10]
@@ -91,51 +87,3 @@ def random_sphere_points(n, radius=5, angle=np.pi/3):
                          np.sin(thetas) * np.sin(phis),
                          np.cos(thetas)))
     return(radius * x)
-
-#%% test script
-
-if __name__ == '__main__':
-    
-    #% flipping a big sheet
-    h = hexbig_lattice()#hex_lattice_with_kink() # hex_with_noise()
-    
-    f = FlexaSheet.flatgen(h, 0.8, 0.8, 1.349, constrained = False)
-    plt.figure(figsize=(10,10))
-    f.draw()
-    plt.savefig('hexbig_graph.png', dpi=200)
-    
-    f.solve_shape(10)
-#    f.plot_energies()
-#    plt.savefig('hex0.8_0.8_1.52_10_energies.png', dpi=200)
-    
-    plt.figure(figsize=(16,16))
-    f.draw()
-    plt.savefig('hexbig0.8_0.8_1.35_10_graph.png', dpi=200)
-    
-    plt.figure(figsize=(20,8))
-    f.draw(style='3d')
-    plt.savefig('hexbig0.8_0.8_1.35_10_plot.png', dpi=200)
-    
-    
-    f.phi0 = 0.95
-    f.solve_shape(10)
-#    f.plot_energies()
-#    plt.savefig('hex0.95_0.8_1.52_10_energies.png', dpi=200)
-    
-    plt.figure(figsize=(16,16))
-    f.draw()
-    plt.savefig('hexbig0.95_0.8_1.35_10_graph.png', dpi=200)
-    
-    plt.figure(figsize=(20,8))
-    f.draw(style='3d')
-    plt.savefig('hexbig0.95_0.8_1.35_10_plot.png', dpi=200)
-
-    #% simulating an icosahedron shape
-    v, f = lattice.ico(3, angle=2*np.pi/5)
-
-    s = FlexaSheet.facegen(v, f, phi0=0.654, psi0=0.8375, ell0=1)
-    s.draw('3d')
-    plt.show()
-    
-    
-    
