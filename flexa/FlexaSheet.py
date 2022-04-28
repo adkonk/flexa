@@ -243,7 +243,7 @@ class FlexaSheet(object):
 
 	@classmethod
 	def trisurfgen(cls, x0, phi0=None, psi0=None, ell0=None, constrained=False):
-		G = cellgraph(x0)
+		G = FlexaSheet.cellgraph(x0)
 		tri = Delaunay(x0)
 
 		# TODO: implement
@@ -257,8 +257,9 @@ class FlexaSheet(object):
 			for i in range(x0.shape[0])])
 		return(G)
 
-	def collar_pairs(self, ):
-		collar_pairs = zip(list(self.neigh_collars.values()))
+	@staticmethod
+	def collar_pairs(neigh_collars):
+		collar_pairs = zip(list(neigh_collars.values()))
 		collar_pairs = np.array(list(collar_pairs)).flatten().reshape(-1, 2)
 		return(collar_pairs)
 	
@@ -277,8 +278,7 @@ class FlexaSheet(object):
 		print(
 			  'Average phi: %0.3e\n' % self.aphi(r) + \
 			  'Average psi: %0.3e\n' % self.apsi(r) + \
-			  'Average collar length: %0.3e\n' % \
-				  np.mean(self.collar_lengths(r))
+			  'Average collar length: %0.3e\n' % np.mean(self.collar_lengths(r))
 			  )
 	
 	## network
@@ -292,17 +292,20 @@ class FlexaSheet(object):
 		return(np.arccos(np.dot(a, b) / np.linalg.norm(a) / np.linalg.norm(b)))
 	
 	@staticmethod 
-	def tri_normal(a: np.ndarray, b=None, c=None, ref=np.array([0, 0, 1])):
-		if a.shape[1] == 2: return ref 
+	def tri_normal(a, b=None, c=None, ref=np.array([0, 0, 1])):
+		# TODO: check inputs better
+		if (len(a.shape) == 1 and a.size == 2) \
+			or (len(a.shape) == 2 and a.shape[1] == 2): 
+			return ref 
 
 		if b is None and c is None:
-			assert a.shape[0] == 3
+			assert len(a.shape) == 2 and a.shape[0] == 3
 			b = a[1, :]
 			c = a[2, :]
 			a = a[0, :]
-		
+
 		n = np.cross(b - a, c - a)
-		n /= np.linalg.norm(n)
+		n = n / np.linalg.norm(n)
 		if np.dot(n, ref) < 0:
 			n *= -1
 		return(n)
@@ -319,14 +322,17 @@ class FlexaSheet(object):
 		v /= np.linalg.norm(v)
 
 		if np.dot(v, ref) < 0:
-		  return(-1 * v)
+			return(-1 * v)
 		else:
-		  return(v)
+			return(v)
 
 	def cell_normal(self, r, cell):
 		rcis = r[self.cell_collars[cell], :]
 		rc = r[cell, :]
-		return(FlexaSheet.face_normal(rcis, np.sum(rcis - rc, axis=0)))
+		if len(self.cell_collars[cell]) == 3:
+			return(FlexaSheet.tri_normal(rcis, ref=np.sum(rcis - rc, axis=0)))
+		else:
+			return(FlexaSheet.face_normal(rcis, np.sum(rcis - rc, axis=0)))
 	
 	# calculating the energies
 	def phis(self, r):
@@ -402,10 +408,10 @@ class FlexaSheet(object):
 		return(np.sum((self.collar_lengths(r) - self.ell0) ** 2))
 
 	def energy(self, x, k_spring=0):
-	  r = x.reshape((-1, 3))
-	  e = self.phi_energy(r) + self.psi_energy(r)
-	  e += k_spring * self.spring_energy(r) 
-	  return(e)   
+		r = x.reshape((-1, 3))
+		e = self.phi_energy(r) + self.psi_energy(r)
+		e += k_spring * self.spring_energy(r) 
+		return(e)   
 	 
 	# simulate
 	def solve_shape(self, k_spring=0):
@@ -460,7 +466,7 @@ class FlexaSheet(object):
 	
 		# psi energies
 		ax2 = fig.add_subplot(2, 1, 2, sharex=ax1)
-		collar_pairs = self.collar_pairs()
+		collar_pairs = FlexaSheet.collar_pairs(self.neigh_collars)
 		ax2.plot(
 			np.linalg.norm((r[collar_pairs[:, 0], :] + \
 						   r[collar_pairs[:, 1], :]) / 2, axis=1),
@@ -514,7 +520,7 @@ class FlexaSheet(object):
 						 r[self.n_cells:, 2])
 			
 			xflines = r.reshape(-1, 1, 3) # format for plotting lines, idk why
-			collar_pairs = self.collar_pairs()
+			collar_pairs = FlexaSheet.collar_pairs(self.neigh_collars)
 			# TODO: add colors based on distance from camera
 			c = Line3DCollection(
 				np.concatenate([xflines[collar_pairs[:, 1]], 
