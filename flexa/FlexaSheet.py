@@ -5,6 +5,7 @@ import networkx as nx
 from scipy.spatial import Voronoi, Delaunay, voronoi_plot_2d
 from scipy.optimize import minimize
 import time
+import pickle
 
 class FlexaSheet(object):
 	def __init__(self, G, phi0=None, psi0=None, ell0=None,
@@ -554,3 +555,43 @@ class FlexaSheet(object):
 			plt.tight_layout()
 		# TODO: add plotter showing phi energy at each cell and 
 		# psi energy at each boundary
+	
+	## file management
+	@staticmethod
+	def picklify(name):
+		ext = '.p'
+		if not name.lower().endswith(ext):
+			name = name + ext
+		return(name)
+
+	def __eq__(self, other):
+		if isinstance(other, FlexaSheet):
+			return np.all(self.x == other.x) and \
+				self.cell_collars == other.cell_collars and \
+				self.neigh_collars == other.neigh_collars
+		return(False)
+
+	def save(self, name):
+		data = {}
+
+		data['init_params'] = {'G': self.G, 'phi0': self.phi0, 
+			'psi0': self.psi0, 'ell0': self.ell0, 
+			'constrained': self.constrained}
+		
+		data['attributes'] = {'x': self.x}
+
+		with open(FlexaSheet.picklify(name), 'wb') as f:
+			pickle.dump(data, f)
+
+	@classmethod
+	def load(cls, name):
+		with open(FlexaSheet.picklify(name), 'rb') as f:
+			saved = pickle.load(f)
+		
+		data = saved['init_params']
+		s = cls(data['G'], data['phi0'], data['psi0'], data['ell0'],
+			data['constrained'])
+		
+		s.__dict__.update(saved['attributes'])
+		
+		return(s)

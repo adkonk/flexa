@@ -3,6 +3,7 @@ import unittest
 
 import numpy as np
 import networkx as nx
+import os
 
 class Test_FlexaSheet(unittest.TestCase):
     def setUp(self):
@@ -73,7 +74,10 @@ class Test_FlexaSheet(unittest.TestCase):
         G.add_nodes_from([(i, {'x0': self.r[i, :], 'cell': True}) \
             for i in range(3)])
         
-        self.assertEqual(FlexaSheet.cellgraph(self.r[:3, :]), G)
+        cellgraph = FlexaSheet.cellgraph(self.r[:3, :])
+        em = nx.algorithms.isomorphism.numerical_edge_match(['x0', 'cell'], 
+            [0, 0])
+        self.assertTrue(nx.is_isomorphic(cellgraph, G, edge_match=em))
 
     def test_collar_pairs(self):
         collar_pairs = np.array([[3, 4], [3, 6], [3, 5]])
@@ -195,6 +199,39 @@ class Test_FlexaSheet(unittest.TestCase):
     def test_solve_shape(self):
         self.f.solve_shape(1)
         self.assertArrayEqual(self.f.x.reshape((-1, 3)), self.r)
+    
+    def test_equals(self):
+        self.assertNotEqual(self.f, [1, 2, 3])
+        attrs = {'x': self.f.x, 'cell_collars': self.f.cell_collars,
+                 'neigh_collars': self.f.neigh_collars}
+        self.assertFalse(self.f == attrs)
+
+        f2 = FlexaSheet(self.f.G)
+        self.assertEqual(self.f, f2)
+        f2.phi0 = 999
+        self.assertEqual(self.f, f2)
+        self.assertTrue(self.f == f2)
+
+        f2.x[0] = 999
+        self.assertFalse(self.f == f2)
+
+    def test_picklify(self):
+        base = 'hello'
+        expected = base + '.p'
+        self.assertEqual(FlexaSheet.picklify(base), expected)
+        self.assertEqual(FlexaSheet.picklify(expected), expected)
+
+    def test_save_load(self):
+        f2 = FlexaSheet(self.f.G)
+        dir_path = os.path.dirname(os.path.realpath(__file__))
+        tmp_path = os.path.join(dir_path, 'tmp')
+
+        self.f.save(tmp_path)
+        f_load = FlexaSheet.load(tmp_path)
+        self.assertEqual(f_load, self.f) # generating object
+        self.assertEqual(f_load, f2) # equivalent object
+
+        os.remove(FlexaSheet.picklify(tmp_path))
     
 if __name__ == '__main__':
     unittest.main()
