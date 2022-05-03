@@ -90,6 +90,19 @@ class Test_FlexaSheet(unittest.TestCase):
     def test_angle(self):
         self.assertEqual(FlexaSheet.angle([1, 0, 0], [0, 1, 0]), np.pi / 2)
 
+    def test_align(self):
+        ref = np.array([0, 0, 1])
+
+        a = np.array([1, 1, 1])
+        self.assertArrayEqual(FlexaSheet.align(a, ref), a)
+
+        a = np.array([0, 1, 0])
+        self.assertArrayEqual(FlexaSheet.align(a, ref), a)
+
+        a = np.array([-1, -1, -1])
+        self.assertTrue(np.dot(a, ref) < 0)
+        self.assertArrayEqual(FlexaSheet.align(a, ref), a)
+
     def test_tri_normal(self):
         ref = np.array([0, 0, 1])
         a = np.array([0, 1])

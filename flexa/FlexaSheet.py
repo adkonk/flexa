@@ -8,11 +8,52 @@ import time
 import pickle
 
 class FlexaSheet(object):
+	"""A class to describe and simulate sheets of Choanaeca flexa sheets. 
+
+	Attributes:
+		G (nx.Graph): see __init__
+		x (np.ndarray): flattened array of cell and collar coordinates in the 
+			order given by G. The `(n, 3)` 2d array with position 3-vectors as
+			rows are given by `x.reshape(-1, 3)`
+		n (int): number of points (both cells and collars) with coordinates
+		n_cells (int): number of cells in `G`
+		cell_collars (dict): dictionary of `{cell: [collar nodes that cell
+			is attached to]}`
+		neigh_collars (dict): dictionary `{(cell 1, cell2): (collar node 1,
+			collar node 2)}` where the collar nodes correspond to the 
+			boundary between cells 1 and 2. In a sense, neigh_collars stores
+			the dual graph information in the surface of the collar network
+		collar_edges (list): list of edges between cells and collar nodes
+		phi0 (float): equilibrium phi angle
+		psi0 (float): equilibrium psi angle
+		ell0 (float): equilibrium cell-collar length
+		constrained (bool): are the cell-collar edge lengths fixed?
+	"""
 	def __init__(self, G, phi0=None, psi0=None, ell0=None,
 				 constrained=False, silent=0):
-		""" Generates the FlexaSheet object
-		Parameters:
-			G: networkx graph
+		"""Create FlexaSheet object
+
+		Args:
+			G (nx.Graph): graph describing flexa sheet topology. Contains nodes
+				with attributes `cell` (bool) and attributes `x0` (1d array).
+				Has edges between cells and collar nodes with attributes 
+				`collar=True` (bool) and edges between contacting cells
+				with attributes `collar=False` (bool) and 
+				`collar_pts=(c1, c2)` where `c1` and `c2` are the collar nodes
+				corresponding to the boundary between the two cells.
+			phi0 (float, optional): equilibrium phi angle. Defaults to average
+				phi value in initial sheet.
+			psi0 (float, optional): equilibrium psi angle. Defaults to average
+				phi value in initial sheet.
+			ell0 (float or np.ndarray, optional): equilibrium cell-collar 
+				length, either constant for the whole sheet or given
+				for each cell-collar edge. Defaults to initial lengths for 
+				each cell-collar edge
+			constrained (bool, optional): fixes cell-collar lengths. 
+				Only used during simulation. Specified during initialisation 
+				to ensure initial lengths are equal to ell0. Defaults to False.
+			silent (int, optional): argument to silence initialisation. Can be 
+				0: all messages printed, 1: no messages. Defaults to 0.
 		"""
 		
 		self.G = G
@@ -38,45 +79,58 @@ class FlexaSheet(object):
 		self.collar_edges = np.array(
 			[(e[0], e[1]) for e in self.G.edges.data('collar') if e[2]])
 		
-		if phi0 is None:
+		if phi0 is None: # phi0 = average initial phi0
 			self.phi0 = self.aphi(r)
 		else: self.phi0 = phi0
-		if psi0 is None:
+		if psi0 is None:# psi0 = average initial psi0
 			self.psi0 = self.apsi(r)
 		else: self.psi0 = psi0
 		self.constrained = constrained
-		if ell0 is None:
+		if ell0 is None: # ell0 = initial ell0s
 			self.ell0 = self.collar_lengths(r)
 		else:
-			if self.constrained:
+			if self.constrained: # all initial lengths must == ell0 if constr
 				assert np.all(self.collar_lengths(r) == ell0)
 			self.ell0 = ell0
 		
-		if silent == 0:
+		if silent == 0: # print stats
 			print('\nInitial energies')
 			self.energy_stats(r)
 			print('\nInitial geometry:')
 			self.geom_stats(r)
 
 	@classmethod
-	def flatgen(cls, x0, phi0=None, psi0=None, ell0=None, constrained=False,
-			silent=0):
-		assert x0.shape[1] == 2 or (x0.shape[1] == 3 and np.all(x0[:, 2] == 0))
-		
-		if x0.shape[1] == 2:
-			x0 = np.concatenate((x0, np.zeros((x0.shape[0], 1))), axis=1)
-		
-		n_cells = x0.shape[0]
+	def flatgen(cls, r0, z=1, **kwargs):
+		"""Generates a FlexaSheet object from an initial lattice of points 
+		on the plane.
 
-		vor = Voronoi(x0[:, :2])
-		collars = np.concatenate((vor.vertices, 
-									np.ones((vor.vertices.shape[0], 1))),
-						axis=1)
+		Args:
+			r0 (np.ndarray): `(n_cells, 2)` or `(n_cells, 3)` array giving 
+				cell coordinates. If the latter, all z coordinates must be 0
+			z (float): initial z position of collars. Defaults to 1
+			**kwargs: passed to __init__
+	
+		Raises: 
+			AssertionError: if r0 doesn't have 2 columns or has 3 columns but 
+				the third isn't all zero
+
+		Returns: 
+			FlexaSheet: generated from r0, collars at z=1
+		"""
+		assert r0.shape[1] == 2 or (r0.shape[1] == 3 and np.all(r0[:, 2] == 0))
 		
-		G = nx.Graph()
-		# add cell vertices
-		G.add_nodes_from([(i, {'x0': x0[i, :], 'cell': True}) 
-			for i in range(n_cells)])
+		if r0.shape[1] == 2: # add column of zeros to r0
+			r0 = np.concatenate((r0, np.zeros((r0.shape[0], 1))), axis=1)
+		
+		n_cells = r0.shape[0]
+
+		vor = Voronoi(r0[:, :2]) 
+		# TODO: remove this since I use center of mass later anyway
+		collars = np.concatenate( # collar node positions from Voronoi
+			(vor.vertices, z * np.ones((vor.vertices.shape[0], 1))), axis=1)
+		
+		# create graph with cell vertices
+		G = FlexaSheet.cellgraph(r0) 
 	
 		# add collar vertices
 		G.add_nodes_from(
@@ -85,15 +139,17 @@ class FlexaSheet(object):
 
 		pos = nx.get_node_attributes(G, 'x0')
 
+		# lists to store Voronoi edges that extend out to infinity
+		# TODO: handle this more intelligently
 		bad_edges1 = []
 		bad_edges2 = []
-		new_nodes = 0
+		new_nodes = 0 # number of new nodes added (on the boundary)
 		for i in range(len(vor.ridge_points)):
-			cells = vor.ridge_points[i, :]
-			verts = vor.ridge_vertices[i]
+			cells = vor.ridge_points[i, :] # cells for boundary i
+			verts = vor.ridge_vertices[i] # endpt indices for boundary i
 				
 			# make cell-collar edges
-			if verts[0] != -1 and verts[1] != -1:
+			if verts[0] != -1 and verts[1] != -1: # as long as bdary is finite
 				G.add_edge(cells[0], verts[0] + n_cells, collar=True)
 				G.add_edge(cells[1], verts[0] + n_cells, collar=True)
 				
@@ -119,9 +175,8 @@ class FlexaSheet(object):
 					np.array([0, 0, 1])
 		nx.set_node_attributes(G, pos, 'x0')
 		
+		# handle edges going out to infinity
 		for (cells, verts) in bad_edges1:
-			# make a new collar node equally distant as the existing collar 
-			# node
 			# find vector to existing collar node
 			dirr = pos[verts[1] + n_cells] - pos[cells[0]]
 			
@@ -133,14 +188,13 @@ class FlexaSheet(object):
 			dirr *= np.array([1, 1, -1])
 			
 			new_node = G.number_of_nodes()
-			G.add_node(new_node, x0=(pos[cells[0]] + 
-										pos[cells[1]]) / 2 - dirr, 
-						cell=False)
+			G.add_node(new_node, x0=(pos[cells[0]] + pos[cells[1]]) / 2 - dirr, 
+				cell=False)
 			G.add_edge(cells[0], new_node, collar=True)
 			G.add_edge(cells[1], new_node, collar=True)
 			
 			G.add_edge(cells[0], cells[1], collar=False,
-						collar_pts=[verts[1] + n_cells, new_node])
+				collar_pts=[verts[1] + n_cells, new_node])
 			
 		for (cells, verts) in bad_edges2:
 			dirr = pos[verts[0] + n_cells] - pos[cells[0]]
@@ -151,27 +205,52 @@ class FlexaSheet(object):
 			dirr *= np.array([1, 1, -1])
 
 			new_node = G.number_of_nodes()
-			G.add_node(new_node, x0=(pos[cells[0]] + 
-										pos[cells[1]]) / 2 + dirr, 
-						cell=False)
+			G.add_node(new_node, x0=(pos[cells[0]] + pos[cells[1]]) / 2 + dirr, 
+				cell=False)
 			G.add_edge(cells[0], new_node, collar=True)
 			G.add_edge(cells[1], new_node, collar=True)
 
 			G.add_edge(cells[0], cells[1], collar=False,
-						collar_pts=[verts[0] + n_cells, new_node])
+				collar_pts=[verts[0] + n_cells, new_node])
 
-		return(cls(G, phi0, psi0, ell0, constrained, silent))
+		return(cls(G, **kwargs))
 
 	@classmethod
-	def facegen(cls, x0, faces, phi0=None, psi0=None, ell0=None,
-				constrained=False, silent=0):
-		G = FlexaSheet.cellgraph(x0)
+	def facegen(cls, r0, faces, z=1, **kwargs):
+		"""Generates FlexaSheet object from initial cell coordinates r0 and 
+		faces (consisting of cell-cell interactions). 
 
-		neigh_collars = dict()
-		def sortkey(i, j):
+		Creates initial collar positions based on the normals of the faces
+		given in `faces` using either `tri_normal` or `face_normal` depending on
+		the number of cells in each face. 
+
+		Args:
+			r0 (np.ndarray): `(n_cells, 3)` array giving cell coordinates.
+			faces (list): list of lists containing indices for cells 
+				corresponding to a face of the initial sheet. Assumed to be 
+				cyclic as interactions between cells ([..., i, i+1, ...] 
+				indicates that (i, i+1) is a cell-cell interaction)
+			z (float): collar offset from cells in direction of face normals
+			**kwargs: passed to __init__
+
+		Raises: 
+			AssertionError: if r0 does not have 3 columns
+
+		Returns: 
+			FlexaSheet: generated from r0 and faces
+		"""
+		assert r0.shape[1] == 3
+
+		# create graph with cell vertices
+		G = FlexaSheet.cellgraph(r0) 
+
+		neigh_collars = dict() # {(cell1, cell2): (collar 1, collar 2)}
+		def sortkey(i, j): 
+			"""Returns sorted tuple (min, max) for indexing neigh_collars"""
 			assert i != j
 			return(min(i, j), max(i, j))
 
+		# add cell-cell edges as keys based on faces
 		for (i, j) in zip(faces[:, 0], faces[:, 1]):
 			neigh_collars[sortkey(i, j)] = []
 		for (i, j) in zip(faces[:, 1], faces[:, 2]):
@@ -179,22 +258,26 @@ class FlexaSheet(object):
 		for (i, j) in zip(faces[:, 2], faces[:, 0]):
 			neigh_collars[sortkey(i, j)] = []
 		
+		# choose face normal function based on number of cells per face
 		if np.all(np.equal([len(f) for f in faces], 3)):
 			normfunc = FlexaSheet.tri_normal
 		else: 
 			normfunc = FlexaSheet.face_normal
 
-		if ell0 is None:
-			ell0 = 1
+		# TODO: actual initial lengths are > z. Default ell0 to initial lengths?
+		kwargs['ell0'] = z # equilibrium length will be set to z
 
-		edge_perps = dict()
+		edge_perps = dict() # {(cell1, cell2): normal vec for one face with 
+							# (cell1, cell2) as an edge}
 
 		for f in faces:
 			# TODO: add argument to make ref point towards the origin
 			# for every face
-			ref = np.array([0, 0, 1])
-			n = normfunc(x0[f, :], ref=ref)
-			x = np.mean(x0[f, :], axis=0) + ell0 * n
+			# TODO: default edge_perps[(a,b)] to be average of all normal
+			# vectors for faces with edge (a, b)
+			ref = np.array([0, 0, 1]) # reference vector to orient face normal
+			n = normfunc(r0[f, :], ref=ref) # face normal
+			x = np.mean(r0[f, :], axis=0) + z * n # collar node position
 
 			edge_perps[sortkey(f[0], f[1])] = n
 			edge_perps[sortkey(f[1], f[2])] = n
@@ -217,6 +300,7 @@ class FlexaSheet(object):
 			assert len(v) > 0 and len(v) <= 2
 			i = k[0]
 			j = k[1]
+			# handle cell-cell interactions with only one collar node
 			if len(v) == 1:
 				new_node = G.number_of_nodes()
 				x = pos[v[0]] # existing collar position
@@ -238,31 +322,41 @@ class FlexaSheet(object):
 
 			G.add_edge(i, j, collar=False, collar_pts=v)
 
-		return(cls(G, phi0, psi0, ell0, constrained, silent))
+		return(cls(G, **kwargs))
 
 	@classmethod
-	def trisurfgen(cls, x0, phi0=None, psi0=None, ell0=None, constrained=False):
-		G = FlexaSheet.cellgraph(x0)
-		tri = Delaunay(x0)
+	def trisurfgen(cls, r0, **kwargs):
+		"""Generates FlexaSheet object from arbitrary 3-column vector of 
+		initial cell coordinates r0
+
+		Args:
+			x0 (np.ndarray): initial cell coordinates
+			**kwargs: passed to __init__
+		"""
+		G = FlexaSheet.cellgraph(r0)
+		tri = Delaunay(r0)
 
 		# TODO: implement
 		raise NotImplementedError('not done yet')
 
 	@staticmethod
-	def cellgraph(x0):
+	def cellgraph(r0):
+		"""Creates a graph with cell vertices with coordinates from r0"""
 		G = nx.Graph()
 		# add cell vertices
-		G.add_nodes_from([(i, {'x0': x0[i, :], 'cell': True}) 
-			for i in range(x0.shape[0])])
+		G.add_nodes_from([(i, {'x0': r0[i, :], 'cell': True}) 
+			for i in range(r0.shape[0])])
 		return(G)
 
 	@staticmethod
 	def collar_pairs(neigh_collars):
+		"""Returns an array of collar node pairs for cell-cell bdary ends"""
 		collar_pairs = zip(list(neigh_collars.values()))
 		collar_pairs = np.array(list(collar_pairs)).flatten().reshape(-1, 2)
 		return(collar_pairs)
 	
 	def energy_stats(self, r):
+		"""Prints energy statistics for sheet with coordinates r"""
 		e_phi = self.phi_energy(r)
 		e_psi = self.psi_energy(r)
 		e_spring = self.spring_energy(r)
@@ -274,6 +368,7 @@ class FlexaSheet(object):
 		return(e_phi, e_psi, e_spring)
 	
 	def geom_stats(self, r):
+		"""Prints average geometric statistics """
 		print(
 			  'Average phi: %0.3e\n' % self.aphi(r) + \
 			  'Average psi: %0.3e\n' % self.apsi(r) + \
@@ -282,16 +377,26 @@ class FlexaSheet(object):
 	
 	## network
 	def cell_degrees(self):
+		"""Returns dictionary {cell: number of neighboring cells}"""
 		return({c: len(collars) for (c, collars) in self.cell_collars.items()})
 	
 	## simulation
 	# basic algebra
 	@staticmethod
 	def angle(a, b):
+		"""Returns angle between vectors a and b"""
 		return(np.arccos(np.dot(a, b) / np.linalg.norm(a) / np.linalg.norm(b)))
 	
+	@staticmethod
+	def align(a, ref):
+		"""Orients a in direction of ref"""
+		if np.dot(a, ref) < 0:
+			a *= -1
+		return(a)
+
 	@staticmethod 
 	def tri_normal(a, b=None, c=None, ref=np.array([0, 0, 1])):
+		"""Returns normal vector to plane defined by 3 rows in a or vecs abc"""
 		# TODO: check inputs better
 		if (len(a.shape) == 1 and a.size == 2) \
 			or (len(a.shape) == 2 and a.shape[1] == 2): 
@@ -305,27 +410,24 @@ class FlexaSheet(object):
 
 		n = np.cross(b - a, c - a)
 		n = n / np.linalg.norm(n)
-		if np.dot(n, ref) < 0:
-			n *= -1
-		return(n)
+		return(FlexaSheet.align(n, ref))
 	
 	@staticmethod
 	def face_normal(r, ref=np.array([0, 0, 1])):
+		"""Returns normal to points (rows) in r by least squares plane approx"""
 		# solve least squares approximation z_i = (x_i, y_i) * (v_1, v_2) + c
 		# so then the normal vector for plane is (v_1, v_2, -1)
 		x = np.concatenate((r[:, :2], np.ones((r.shape[0], 1))), 
 						   axis = 1)
 		v = np.linalg.inv(x.T @ x) @ x.T @ r[:, [2]]
-		v = np.array([v[0, 0], v[1, 0], -1])
+		v = np.array([v[0, 0], v[1, 0], -1]) # OLS coefficients with -1 for z 
 	
 		v /= np.linalg.norm(v)
 
-		if np.dot(v, ref) < 0:
-			return(-1 * v)
-		else:
-			return(v)
+		return(FlexaSheet.align(v, ref))
 
 	def cell_normal(self, r, cell):
+		"""Returns normal vector corresponding to a cell based on its collars"""
 		rcis = r[self.cell_collars[cell], :]
 		rc = r[cell, :]
 		if len(self.cell_collars[cell]) == 3:
@@ -335,6 +437,7 @@ class FlexaSheet(object):
 	
 	# calculating the energies
 	def phis(self, r):
+		"""Returns {cell: [phi angles for cell's collar nodes]}"""
 		ps = {}
 		for (c, collar_nodes) in self.cell_collars.items():
 			n = self.cell_normal(r, c)
@@ -344,20 +447,24 @@ class FlexaSheet(object):
 	
 	# average phi
 	def aphi(self, r):
+		"""Returns average phi for whole sheet"""
 		ps = self.phis(r)
 		phi_tot = np.sum([p for cell_phis in ps.values() for p in cell_phis])
 		n = sum(self.cell_degrees().values())
 		return(phi_tot / n)
 	
 	def phi_energies(self, r):
+		"""Returns dictionary of phi energy for each cells"""
 		return({i: np.sum((phis_c - self.phi0) ** 2) \
 				for (i, phis_c) in self.phis(r).items()})
 	
 	def phi_energy(self, r):
+		"""Returns phi energy for whole sheet"""
 		e = sum(self.phi_energies(r).values())
 		return(e)
 	
 	def psis(self, r):
+		"""Returns dictionary {(cell1, cell2): psi}"""
 		ps = {}
 		for (cells, collars) in self.neigh_collars.items():
 			# find normal vector a for cell 1 to shared collar boundary
@@ -386,34 +493,41 @@ class FlexaSheet(object):
 		return(ps)
 	
 	def apsi(self, r):
+		"""Returns average psi for whole sheet"""
 		ps = self.psis(r)
 		psi_tot = sum([p for p in ps.values()])
 		n = len(self.neigh_collars)
 		return(psi_tot / n)
 	
 	def psi_energies(self, r):
+		"""Returns {(cell1, cell2): psi energy = (psi - psi0) ** 2}"""
 		return({uv: (psi - self.psi0) ** 2 \
 				for (uv, psi) in self.psis(r).items()})
 	
 	def psi_energy(self, r):
+		"""Returns whole sheet psi energy"""
 		e = sum([(psi - self.psi0) ** 2 for psi in self.psis(r).values()])
 		return(e)
 
 	def collar_lengths(self, r):
+		"""Returns 1d array of cell-collar lengths in order of collar_edges"""
 		return(np.linalg.norm(r[self.collar_edges[:, 0], :] - \
 							  r[self.collar_edges[:, 1], :], axis = 1))
 
 	def spring_energy(self, r):
+		"""Returns whole sheet cell-collar length energy"""
 		return(np.sum((self.collar_lengths(r) - self.ell0) ** 2))
 
-	def energy(self, x, k_spring=0):
+	def energy(self, x, k=0):
+		"""Returns sum of whole sheet energies with spring energy times k"""
 		r = x.reshape((-1, 3))
 		e = self.phi_energy(r) + self.psi_energy(r)
-		e += k_spring * self.spring_energy(r) 
+		e += k * self.spring_energy(r) 
 		return(e)   
 	 
 	# simulate
-	def solve_shape(self, k_spring=0, silent=0):
+	def solve_shape(self, k=0, silent=0):
+		"""Minimise (with self.constrained) sheet energy (spring constant k)"""
 		# silent 0: complete info, 1: time elapsed only, 2: nothing
 		n_edges = self.collar_edges.shape[0]
 		 
@@ -434,7 +548,7 @@ class FlexaSheet(object):
 					   'fun': lambda x:
 						   self.collar_lengths(x.reshape((-1, 3))) - self.ell0,
 					   'jac': lambda x: J_collar_lengths(x)}
-			assert k_spring == 0
+			assert k == 0
 		else: eq_cons = []
 		# blasting it with the minimisation routine
 		if silent == 0:
@@ -442,7 +556,7 @@ class FlexaSheet(object):
 		t = time.time()
 		res = minimize(
 				self.energy, self.x, method='SLSQP', 
-				args = (k_spring),
+				args = (k),
 				constraints = eq_cons
 				)
 		if silent in [0, 1]:
@@ -457,6 +571,7 @@ class FlexaSheet(object):
 	 
 	## shape analysis
 	def plot_energies(self, ):
+		"""Plots phi and psi energies as functions of radius out from x,y=0"""
 		# TODO: develop this
 		r = self.x.reshape((-1, 3))
 		
@@ -480,6 +595,18 @@ class FlexaSheet(object):
 	
 	## plotting
 	def draw(self, style='flat', x0=False, nodes=[], edges=[], ax=None):
+		"""Plotting method for flexa sheets. 
+
+		Args:
+			style (str, optional): choice of style. Currently supports 'flat' 
+				and '3d'. Defaults to 'flat'.
+			x0 (bool, optional): option to plot based on initial coordinates 
+				rather than current coordinates `x`. Defaults to False.
+			nodes (list, optional): list of nodes to highlight. Defaults to [].
+			edges (list, optional): list of edges to highlight. Defaults to [].
+			ax (_type_, optional): axes to plot on. If specified and 
+				`style='3d'`, only one projection is shown. Defaults to None.
+		"""
 		if style == 'flat':
 			if x0:
 				pos = nx.get_node_attributes(self.G, 'x0')
@@ -565,12 +692,14 @@ class FlexaSheet(object):
 	## file management
 	@staticmethod
 	def picklify(name):
+		"""Adds '.p' to file names if not already present"""
 		ext = '.p'
 		if not name.lower().endswith(ext):
 			name = name + ext
 		return(name)
 
 	def __eq__(self, other):
+		"""Tests FlexaSheet equality based on coordinates and edges"""
 		if isinstance(other, FlexaSheet):
 			return np.all(self.x == other.x) and \
 				self.cell_collars == other.cell_collars and \
@@ -578,6 +707,7 @@ class FlexaSheet(object):
 		return(False)
 
 	def save(self, name):
+		"""Efficiently stores this FlexaSheet object at filepath name"""
 		data = {}
 
 		data['init_params'] = {'G': self.G, 'phi0': self.phi0, 
@@ -591,6 +721,7 @@ class FlexaSheet(object):
 
 	@classmethod
 	def load(cls, name, silent=1):
+		"""Loads FlexaSheet at filepath name, passes silent to __init__"""
 		with open(FlexaSheet.picklify(name), 'rb') as f:
 			saved = pickle.load(f)
 		

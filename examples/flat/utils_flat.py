@@ -1,4 +1,4 @@
-from flexa.lattice import hex_lattice, hexbig_lattice, hex_with_kink, \
+from flexa.lattice import hex_lattice, hex_with_kink, \
     hex_with_bump
 from flexa.FlexaSheet import FlexaSheet
 
@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
-name_to_func = {'hex': hex_lattice, 'hexbig': hexbig_lattice,
+name_to_func = {'hex': hex_lattice, 'hexbig': lambda: hex_lattice(15),
                 'kink': hex_with_kink, 'bump': hex_with_bump}
 
 def save_folder_path(folder_name, make=True):
