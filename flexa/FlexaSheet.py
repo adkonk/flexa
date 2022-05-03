@@ -9,7 +9,7 @@ import pickle
 
 class FlexaSheet(object):
 	def __init__(self, G, phi0=None, psi0=None, ell0=None,
-				 constrained=False):
+				 constrained=False, silent=0):
 		""" Generates the FlexaSheet object
 		Parameters:
 			G: networkx graph
@@ -38,10 +38,6 @@ class FlexaSheet(object):
 		self.collar_edges = np.array(
 			[(e[0], e[1]) for e in self.G.edges.data('collar') if e[2]])
 		
-		# TODO: fix the startup message
-		print('%d cell-cell interactions \n' % len(G.edges) + \
-				'%d boundary collar nodes' % len(G.edges))
-		
 		if phi0 is None:
 			self.phi0 = self.aphi(r)
 		else: self.phi0 = phi0
@@ -56,13 +52,15 @@ class FlexaSheet(object):
 				assert np.all(self.collar_lengths(r) == ell0)
 			self.ell0 = ell0
 		
-		print('\nInitial energies')
-		self.energy_stats(r)
-		print('\nInitial geometry:')
-		self.geom_stats(r)
+		if silent == 0:
+			print('\nInitial energies')
+			self.energy_stats(r)
+			print('\nInitial geometry:')
+			self.geom_stats(r)
 
 	@classmethod
-	def flatgen(cls, x0, phi0=None, psi0=None, ell0=None, constrained=False):
+	def flatgen(cls, x0, phi0=None, psi0=None, ell0=None, constrained=False,
+			silent=0):
 		assert x0.shape[1] == 2 or (x0.shape[1] == 3 and np.all(x0[:, 2] == 0))
 		
 		if x0.shape[1] == 2:
@@ -162,11 +160,11 @@ class FlexaSheet(object):
 			G.add_edge(cells[0], cells[1], collar=False,
 						collar_pts=[verts[0] + n_cells, new_node])
 
-		return(cls(G, phi0, psi0, ell0, constrained))
+		return(cls(G, phi0, psi0, ell0, constrained, silent))
 
 	@classmethod
 	def facegen(cls, x0, faces, phi0=None, psi0=None, ell0=None,
-				constrained=False):
+				constrained=False, silent=0):
 		G = FlexaSheet.cellgraph(x0)
 
 		neigh_collars = dict()
@@ -240,7 +238,7 @@ class FlexaSheet(object):
 
 			G.add_edge(i, j, collar=False, collar_pts=v)
 
-		return(cls(G, phi0, psi0, ell0, constrained))
+		return(cls(G, phi0, psi0, ell0, constrained, silent))
 
 	@classmethod
 	def trisurfgen(cls, x0, phi0=None, psi0=None, ell0=None, constrained=False):
@@ -415,7 +413,8 @@ class FlexaSheet(object):
 		return(e)   
 	 
 	# simulate
-	def solve_shape(self, k_spring=0):
+	def solve_shape(self, k_spring=0, silent=0):
+		# silent 0: complete info, 1: time elapsed only, 2: nothing
 		n_edges = self.collar_edges.shape[0]
 		 
 		# Jacobian matrix of the above function
@@ -438,19 +437,22 @@ class FlexaSheet(object):
 			assert k_spring == 0
 		else: eq_cons = []
 		# blasting it with the minimisation routine
-		print('\nBeginning solver')
+		if silent == 0:
+			print('\nBeginning solver')
 		t = time.time()
 		res = minimize(
 				self.energy, self.x, method='SLSQP', 
 				args = (k_spring),
 				constraints = eq_cons
 				)
-		print('solver complete\nTime elapsed : %0.2f minutes' % \
-			  ((time.time() - t) / 60))
+		if silent in [0, 1]:
+			print('solver complete\nTime elapsed : %0.2f minutes' % \
+				((time.time() - t) / 60))
 		# return the entire optimiser result so we keep all information
 		self.x = res.x
-		print('\nFinal energies')
-		self.energy_stats(self.x.reshape((-1, 3)))
+		if silent == 0:
+			print('\nFinal energies')
+			self.energy_stats(self.x.reshape((-1, 3)))
 		return(res)
 	 
 	## shape analysis
@@ -510,7 +512,10 @@ class FlexaSheet(object):
 			fig = plt.gcf()
 			r = self.x.reshape((-1, 3))
 			
-			ax = fig.add_subplot(1, 2, 1, projection='3d')
+			ax_given = True
+			if ax is None:
+				ax = fig.add_subplot(1, 2, 1, projection='3d')
+				ax_given = False
 			# TODO: add Triangulation argument to specify cell sheet topology
 			ax.plot_trisurf(r[:self.n_cells, 0], 
 							r[:self.n_cells, 1], 
@@ -519,7 +524,6 @@ class FlexaSheet(object):
 			ax.scatter3D(r[self.n_cells:, 0], 
 						 r[self.n_cells:, 1], 
 						 r[self.n_cells:, 2])
-			
 			xflines = r.reshape(-1, 1, 3) # format for plotting lines, idk why
 			collar_pairs = FlexaSheet.collar_pairs(self.neigh_collars)
 			# TODO: add colors based on distance from camera
@@ -529,6 +533,8 @@ class FlexaSheet(object):
 							   axis = 1)
 				)
 			ax.add_collection3d(c)
+			if ax_given:
+				return(ax)
 			
 			ax.view_init(10, 20)
 			# ax.set_zlim(-1, 2) 
@@ -584,13 +590,13 @@ class FlexaSheet(object):
 			pickle.dump(data, f)
 
 	@classmethod
-	def load(cls, name):
+	def load(cls, name, silent=1):
 		with open(FlexaSheet.picklify(name), 'rb') as f:
 			saved = pickle.load(f)
 		
 		data = saved['init_params']
 		s = cls(data['G'], data['phi0'], data['psi0'], data['ell0'],
-			data['constrained'])
+			data['constrained'], silent)
 		
 		s.__dict__.update(saved['attributes'])
 		

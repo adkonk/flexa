@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import rankdata
 
-from FlexaSheet import FlexaSheet
+from flexa.FlexaSheet import FlexaSheet
 from icosphere import icosphere 
 
 def hex_lattice():
