@@ -1,8 +1,9 @@
-import flexa.lattice
 from flexa.FlexaSheet import FlexaSheet
+from flexa.lattice import ico
 
 import numpy as np
 import matplotlib.pyplot as plt
+
 import os
 
 def save_folder_path(folder_name, make=True):
@@ -14,13 +15,14 @@ def save_folder_path(folder_name, make=True):
 
 path = save_folder_path('plots')
 
-np.random.seed(3)
+# TODO: facegen gives an error when silent=0 and angle > 3*np.pi/5.
+# This probably has to do with collar vertices overlapping with z positions
+# as the icosphere curves radially in
+# No errors when solving shape though!
+v, f = ico(3, radius=2, angle=3*np.pi/5)
 
-points = flexa.lattice.random_sphere_points(50, radius = 1, angle=np.pi/3)
-
-# phi0, psi0 = average phi, psi
-s = FlexaSheet.vorgen(points, silent=0, z=0.3, ref = 'ori')
-
+s = FlexaSheet.facegen(v, f, z=0.5, ref='ori',
+    phi0=0.654, psi0=0.8375, ell0=1, silent=1)
 s.draw('3d')
 plt.savefig(path + '/init.png', dpi=200)
 

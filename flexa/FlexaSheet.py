@@ -200,6 +200,7 @@ class FlexaSheet(object):
 				pos[i] = np.mean(r, axis=0) + z * n
 			elif len(cells) == 2: # boundary collar nodes
 				# find normal vector of the plane the neighboring collar's dual
+				# TODO: this line occasionally throws KeyError, fix it
 				plane_r = np.array([pos[j] for j in G[bdary_collar_neighs[i]]])
 				n = face_normal(plane_r, ref=ref)
 
@@ -556,7 +557,9 @@ class FlexaSheet(object):
 	# TODO: add statistics for cells of different degrees
 	
 	## plotting
-	def draw(self, style='flat', x0=False, nodes=[], edges=[], ax=None):
+	def draw(self, style='flat', x0=False, nodes=[], edges=[], 
+			linecolor=np.array([0, 0, 1]), collarcolor=np.array([1, 0, 0]),
+			ax=None):
 		"""Plotting method for flexa sheets. 
 
 		Args:
@@ -566,6 +569,12 @@ class FlexaSheet(object):
 				rather than current coordinates `x`. Defaults to False.
 			nodes (list, optional): list of nodes to highlight. Defaults to [].
 			edges (list, optional): list of edges to highlight. Defaults to [].
+			linecolor (np.ndarray): array of length 3 for collar-collar
+				line color. Only used when style='3d'. Defaults to blue,
+				np.array([0, 0, 1])
+			collarcolor (np.ndarray): array of length 3 for cell-collar
+				line color. Only used when style='3d'. Defaults to red,
+				np.array([1, 0, 0])
 			ax (_type_, optional): axes to plot on. If specified and 
 				`style='3d'`, only one projection is shown. Defaults to None.
 		"""
@@ -598,55 +607,133 @@ class FlexaSheet(object):
 			plt.axis('equal')
 			
 		if style == '3d':
+			def plot_center(ax):
+				"""Returns the center of the axes ax"""
+				center = np.array([np.mean(ax.get_xlim3d()),
+								   np.mean(ax.get_ylim3d()),
+								   np.mean(ax.get_zlim3d())])
+				return(center)
+			
+			def linecolors(r, origin, azim, elev, color, maxalpha=1, rev=False):
+				"""Generate color argument for LineCollection based on closeness
+				of vectors r to the camera. The cos of the angle between the 
+				camera and vectors r is used as the alpha value. 
+
+				Args:
+					r (np.ndarray): (n, 3) array of vectors
+					origin (np.ndarray): length 3 array for the origin coords
+					azim (float): azimuthal camera angle
+					elev (float): elevation camera angle
+					color (np.ndarray): length 3 array for rgb color
+					maxalpha (float): between 0 and 1, maximum alpha value
+				"""
+				n = r.shape[0]
+				ors = r - origin # vectors o to r
+				oc = np.array([np.cos(elev) * np.cos(azim), 
+							np.cos(elev) * np.sin(azim),
+							np.sin(elev)])[:, np.newaxis] # vector o to camera
+
+				alphas = (ors @ oc) / \
+					np.linalg.norm(ors, axis=1)[:, np.newaxis] / \
+					np.linalg.norm(oc) # = cos(angle between or and oc)
+				alphas = maxalpha * (alphas - alphas.min()) / np.ptp(alphas)
+				colors = np.concatenate((np.tile(color, (n, 1)), alphas),
+					axis=1)
+				if rev:
+					colors[:, 3] = (1 - colors[:, 3]) - (1 - maxalpha)
+				return(colors)
+
+			def colored_line_collection(r, pairs, color, ax, maxalpha=1, 
+					rev=False):
+				"""Returns a Line3DCollection between pairs from vectors r
+				with color and alpha determined by distance from the camera.
+
+				Args:
+					r (np.ndarray): position vector
+					pairs (np.ndarray): (n, 2) array of indices
+					color (np.ndarray): 3 vector passed to linecolors
+					ax (matplotlib axes): axes to plot on
+					maxalpha (float, optional): between 0 and 1. Defaults to 1.
+					rev (bool, optional): option to reverse alphas,
+						so closer to camera is more transparent. Defaults to 
+						False.
+				"""
+				xflines = r.reshape(-1, 1, 3) # format for lines, idk why
+				
+				azim = np.deg2rad(ax.azim)
+				elev = np.deg2rad(ax.elev)
+				
+				colors = linecolors((r[pairs[:, 0]] + r[pairs[:, 1]]) / 2, 
+					plot_center(ax), azim, elev, color, maxalpha, rev)
+
+				c = Line3DCollection(
+					np.concatenate(
+						[xflines[pairs[:, 1]], 
+						 xflines[pairs[:, 0]]], axis = 1),
+					color=colors)
+				return(c)
+
 			fig = plt.gcf()
 			r = self.x.reshape((-1, 3))
 			
+			# first subplot
 			ax_given = True
 			if ax is None:
 				ax = fig.add_subplot(1, 2, 1, projection='3d')
 				ax_given = False
-			# TODO: add Triangulation argument to specify cell sheet topology
+			ax.view_init(10, 20)
+			
+			# extra plotting options that aren't currently used
+			'''# plot cell-cell connections
 			ax.plot_trisurf(r[:self.n_cells, 0], 
 							r[:self.n_cells, 1], 
 							r[:self.n_cells, 2],
-							cmap='spring', edgecolor='black')
-			ax.scatter3D(r[self.n_cells:, 0], 
-						 r[self.n_cells:, 1], 
+							cmap='spring', edgecolor='black', alpha=0)
+			
+			# plot cell bodies
+			cs = linecolors(r[:self.n_cells, :], plot_center(ax), 
+				np.deg2rad(ax.azim), np.deg2rad(ax.elev), 
+				color=np.array([1, 0, 0]), maxalpha=0.5, rev=True)
+			ax.scatter3D(r[:self.n_cells, 0], 
+						 r[:self.n_cells, 1], 
+						 r[:self.n_cells, 2],
+						 c=cs, s=300)
+			'''
+
+			# plot cell-collar connections
+			c = colored_line_collection(r, self.collar_edges, collarcolor, ax,
+				maxalpha=0.1, rev=True)
+			ax.add_collection3d(c)
+
+			# plot collar boundaries
+			ax.scatter3D(r[self.n_cells:, 0], # pyplot handles the alpha
+						 r[self.n_cells:, 1], # on this one by itself
 						 r[self.n_cells:, 2])
-			xflines = r.reshape(-1, 1, 3) # format for plotting lines, idk why
-			collar_pairs = FlexaSheet.collar_pairs(self.neigh_collars)
-			# TODO: add colors based on distance from camera
-			c = Line3DCollection(
-				np.concatenate([xflines[collar_pairs[:, 1]], 
-								xflines[collar_pairs[:, 0]]], 
-							   axis = 1)
-				)
+
+			# plot collar boundaries
+			c = colored_line_collection(r, 
+				FlexaSheet.collar_pairs(self.neigh_collars), 
+				linecolor, ax,)
 			ax.add_collection3d(c)
 			if ax_given:
 				return(ax)
 			
-			ax.view_init(10, 20)
-			# ax.set_zlim(-1, 2) 
-			
+			# second subplot
 			ax = fig.add_subplot(1, 2, 2, projection='3d')
-			c = Line3DCollection(
-				np.concatenate([xflines[collar_pairs[:, 1]], 
-								xflines[collar_pairs[:, 0]]], 
-							   axis = 1)
-				)
-			ax.add_collection3d(c)
-			
-			ax.plot_trisurf(r[:self.n_cells, 0], 
-							r[:self.n_cells, 1], 
-							r[:self.n_cells, 2],
-							cmap='spring', edgecolor='black')
-			ax.scatter3D(r[self.n_cells:, 0], 
-						 r[self.n_cells:, 1], 
-						 r[self.n_cells:, 2])
-			
 			ax.view_init(40, 20)
-			# ax.set_zlim(-1, 2) 
-			
+
+			# matplotlib won't let me reuse these artists! >:(
+			c = colored_line_collection(r, self.collar_edges, collarcolor, ax,
+				maxalpha=0.1, rev=True)
+			ax.add_collection3d(c)
+			c = colored_line_collection(r, 
+				FlexaSheet.collar_pairs(self.neigh_collars), 
+				linecolor, ax,)
+			ax.add_collection3d(c)
+			ax.scatter3D(r[self.n_cells:, 0],
+						 r[self.n_cells:, 1],
+						 r[self.n_cells:, 2])
+
 			plt.tight_layout()
 		# TODO: add plotter showing phi energy at each cell and 
 		# psi energy at each boundary

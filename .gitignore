@@ -7520,3 +7520,8 @@ flexa/__pycache__/_geom_utils.cpython-38.pyc
 tests/__pycache__/test_utils.cpython-38.pyc
 tests/__pycache__/test_geom_utils.cpython-38.pyc
 tests/template.py
+examples/sphere/sphererand/init.png
+examples/sphere/sphererand/final.png
+examples/ico/plots/init.png
+examples/sphere/plots/init.png
+second.py

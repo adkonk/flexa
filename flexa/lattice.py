@@ -88,7 +88,7 @@ def ico(ndiv, radius=5, angle=np.pi/3, lift=False):
 
 def random_sphere_points(n, radius=5, angle=np.pi/3):
     """Samples random points on the sphere of radius 5 with theta < angle"""
-    zmax = -1 + np.cos(angle)
+    zmax = -np.cos(angle)
     z = np.random.uniform(-1, zmax, size=n)
 
     thetas = np.arccos(z)
