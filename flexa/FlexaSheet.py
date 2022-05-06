@@ -8,7 +8,8 @@ from scipy.stats import rankdata
 import time
 import pickle
 
-from flexa._utils import sortkey, pairs, reindex_list_of_lists
+from flexa._utils import *
+from flexa._geom_utils import *
 
 class FlexaSheet(object):
 	"""A class to describe and simulate sheets of Choanaeca flexa sheets. 
@@ -143,8 +144,7 @@ class FlexaSheet(object):
 
 			# reindex
 			keep_verts = np.where(vor.vertices[:, 2] <= z_max + 0.1)[0]
-			faces = reindex_list_of_lists(vor.regions, keep=keep_verts, 
-				default=-1)
+			faces = reindex_list_of_lists(vor.regions, keep=keep_verts)
 			
 			# find points corresponding to ridge vertices
 			vtoc = {}
@@ -196,16 +196,16 @@ class FlexaSheet(object):
 			cells = [j for j in G[i] if cell_booleans[j]]
 			if len(cells) > 2: # collar nodes on interior
 				r = np.array([pos[j] for j in cells])
-				n = FlexaSheet.face_normal(r, ref=ref)
+				n = face_normal(r, ref=ref)
 				pos[i] = np.mean(r, axis=0) + z * n
 			elif len(cells) == 2: # boundary collar nodes
 				# find normal vector of the plane the neighboring collar's dual
 				plane_r = np.array([pos[j] for j in G[bdary_collar_neighs[i]]])
-				n = FlexaSheet.face_normal(plane_r, ref=ref)
+				n = face_normal(plane_r, ref=ref)
 
 				# find closest point from neighboring collar to plane defined by
 				# cell1, cell2, cell1 + n 
-				closest = FlexaSheet.closest_point(pos[cells[0]], pos[cells[1]], 
+				closest = closest_point(pos[cells[0]], pos[cells[1]], 
 					pos[cells[0]] + n, pos[bdary_collar_neighs[i]])
 
 				# bdary collar position is reflection of neighbor collar through
@@ -284,14 +284,13 @@ class FlexaSheet(object):
 				neigh_collars[sortkey(i, j)] = []
 				edge_perps[sortkey(i, j)] = np.zeros(3)
 			
-
 		for fi in range(len(faces)):
 			f = faces[fi]
 			edges = pairs(f)
 			# find normal vector for the face and save it as edge normals
 			# TODO: default edge_perps[(a,b)] to be average of all normal
 			# vectors for faces with edge (a, b)
-			n = FlexaSheet.face_normal(r0[f, :], ref=ref) # face normal
+			n = face_normal(r0[f, :], ref=ref) # face normal
 			x = np.mean(r0[f, :], axis=0) + z * n # collar node position
 
 			for (i, j) in edges:
@@ -301,7 +300,8 @@ class FlexaSheet(object):
 		for fi in range(len(faces)):
 			f = faces[fi]
 			edges = pairs(f)
-			edge_perps = {k: v / np.linalg.norm(v) for (k, v) in edge_perps.items()}
+			edge_perps = {k: v / np.linalg.norm(v) \
+				for (k, v) in edge_perps.items()}
 			new_node = G.number_of_nodes()
 			G.add_node(new_node, x0=face_pos[fi], cell=False)
 
@@ -323,8 +323,7 @@ class FlexaSheet(object):
 				x = pos[v[0]] # existing collar position
 
 				n = edge_perps[k] # normal of the face edge k is part of 
-				closest = FlexaSheet.closest_point(pos[i], pos[j], pos[i] + n, 
-					x)
+				closest = closest_point(pos[i], pos[j], pos[i] + n, x)
 				x_to_plane = closest - x
 
 				G.add_node(new_node, x0=(x + 2 * x_to_plane), cell=False)
@@ -393,87 +392,11 @@ class FlexaSheet(object):
 		return({c: len(collars) for (c, collars) in self.cell_collars.items()})
 	
 	## simulation
-	# basic algebra
-	@staticmethod
-	def angle(a, b):
-		"""Returns angle between vectors a and b"""
-		return(np.arccos(np.dot(a, b) / np.linalg.norm(a) / np.linalg.norm(b)))
-	
-	@staticmethod
-	def align(a, ref):
-		"""Orients a in direction of ref"""
-		if np.dot(a, ref) < 0:
-			a *= -1
-		return(a)
-
-	@staticmethod 
-	def tri_normal(a, b=None, c=None, ref=np.array([0, 0, 1])):
-		"""Returns normal vector to plane defined by 3 rows in a or vecs abc"""
-		# TODO: check inputs better
-		if (len(a.shape) == 1 and a.size == 2) \
-			or (len(a.shape) == 2 and a.shape[1] == 2): 
-			return ref 
-
-		if b is None and c is None:
-			assert len(a.shape) == 2 and a.shape[0] == 3
-			b = a[1, :]
-			c = a[2, :]
-			a = a[0, :]
-
-		if isinstance(ref, str): # type check first to avoid warnings
-			if ref == 'ori': # vector from mean to origin
-				n = (a + b + c) / -3
-				return(n / np.linalg.norm(n))
-			else: 
-				raise ValueError("only 'ori' is supported as string ref")
-
-		n = np.cross(b - a, c - a)
-		n = n / np.linalg.norm(n)
-		return(FlexaSheet.align(n, ref))
-	
-	@staticmethod
-	def face_normal(r, ref=np.array([0, 0, 1])):
-		"""Returns normal to points (rows) in r by least squares plane approx"""
-		if r.shape[0] == 3:
-			return(FlexaSheet.tri_normal(r, ref=ref))
-
-		if isinstance(ref, str): # type check first to avoid warnings
-			if ref == 'ori': # vector from mean to origin
-				n = np.mean(r, axis=0)
-				return(n / -np.linalg.norm(n))
-			else: 
-				raise ValueError("only 'ori' is supported as string ref")
-		
-		# solve least squares approximation z_i = (x_i, y_i) * (v_1, v_2) + c
-		# so then the normal vector for plane is (v_1, v_2, -1)
-		x = np.concatenate((r[:, :2], np.ones((r.shape[0], 1))), 
-						   axis = 1)
-		v = np.linalg.inv(x.T @ x) @ x.T @ r[:, [2]]
-		v = np.array([v[0, 0], v[1, 0], -1]) # OLS coefficients with -1 for z 
-	
-		v /= np.linalg.norm(v)
-
-		return(FlexaSheet.align(v, ref))
-
-	@staticmethod
-	def closest_point(a, b, c, p):
-		"""Returns the closest point to p on the plane defined by a b and c"""
-		m = np.cross(b - a, c - a) # normal vector of plane given by abc
-		k = np.dot(m, a) # plane equation is m dot x = k (here x = a)
-
-		c = (k - np.dot(m, p)) / np.dot(m, m) # closest point on ab, n
-											  # plane to p is given by p + cm
-		
-		return(p + c * m)
-
 	def cell_normal(self, r, cell):
 		"""Returns normal vector corresponding to a cell based on its collars"""
 		rcis = r[self.cell_collars[cell], :]
 		rc = r[cell, :]
-		if len(self.cell_collars[cell]) == 3:
-			return(FlexaSheet.tri_normal(rcis, ref=np.sum(rcis - rc, axis=0)))
-		else:
-			return(FlexaSheet.face_normal(rcis, ref=np.sum(rcis - rc, axis=0)))
+		return(face_normal(rcis, ref=np.sum(rcis - rc, axis=0)))
 	
 	# calculating the energies
 	def phis(self, r):
@@ -481,7 +404,7 @@ class FlexaSheet(object):
 		ps = {}
 		for (c, collar_nodes) in self.cell_collars.items():
 			n = self.cell_normal(r, c)
-			ps[c] = np.array([FlexaSheet.angle(n, r[ci,:] - r[c,:]) \
+			ps[c] = np.array([angle(n, r[ci,:] - r[c,:]) \
 			  for ci in collar_nodes])
 		return(ps)
 	
@@ -507,28 +430,27 @@ class FlexaSheet(object):
 		"""Returns dictionary {(cell1, cell2): psi}"""
 		ps = {}
 		for (cells, collars) in self.neigh_collars.items():
+			# cell normal 1
+			n1 = np.sum(r[self.cell_collars[cells[0]], :] - r[cells[0], :], 
+						axis=0) # more efficient than face_normal
+			
 			# find normal vector a for cell 1 to shared collar boundary
 			c11 = r[collars[0], :] - r[cells[0], :]
 			c12 = r[collars[1], :] - r[cells[0], :]
-			a = np.cross(c11, c12)
-			n1 = np.sum(r[self.cell_collars[cells[0]], :] - r[cells[0], :], 
-						axis=0)
-			# flip a if it doesn't line up with average cell to collar vec n1
-			if np.dot(n1, a) < 0:
-				a *= -1
+			a = np.cross(c11, c12) # collar-(cell 1)-collar normal
+			a = align(a, n1) # align a with reference cell normal
 	
-			# find normal vector b for cell 2 to shared collar boundary
+			# repeat for cell 2
 			c21 = r[collars[0], :] - r[cells[1], :]
 			c22 = r[collars[1], :] - r[cells[1], :]
 			n2 = np.sum(r[self.cell_collars[cells[1]], :] - r[cells[1], :], 
 						axis=0)
-			b = np.cross(c21, c22)
-			if np.dot(n2, b) < 0:
-				b *= -1
+			b = np.cross(c21, c22) # collar-(cell 2)-collar normal
+			b = align(b, n2)
 	
 			# get the angle on the inside of the hinge between the two cells
 			# at the collar boundary 
-			psi = np.pi - FlexaSheet.angle(a, b)
+			psi = np.pi - angle(a, b)
 			ps[cells] = psi / 2
 		return(ps)
 	
@@ -730,14 +652,6 @@ class FlexaSheet(object):
 		# psi energy at each boundary
 	
 	## file management
-	@staticmethod
-	def picklify(name):
-		"""Adds '.p' to file names if not already present"""
-		ext = '.p'
-		if not name.lower().endswith(ext):
-			name = name + ext
-		return(name)
-
 	def __eq__(self, other):
 		"""Tests FlexaSheet equality based on coordinates and edges"""
 		if isinstance(other, FlexaSheet):
@@ -756,13 +670,13 @@ class FlexaSheet(object):
 		
 		data['attributes'] = {'x': self.x}
 
-		with open(FlexaSheet.picklify(name), 'wb') as f:
+		with open(picklify(name), 'wb') as f:
 			pickle.dump(data, f)
 
 	@classmethod
 	def load(cls, name, silent=1):
 		"""Loads FlexaSheet at filepath name, passes silent to __init__"""
-		with open(FlexaSheet.picklify(name), 'rb') as f:
+		with open(picklify(name), 'rb') as f:
 			saved = pickle.load(f)
 		
 		data = saved['init_params']

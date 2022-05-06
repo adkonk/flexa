@@ -7516,3 +7516,7 @@ examples/flat/landscape/hex1.06_0.95_1.53_10.p
 examples/flat/landscape/hex1.06_0.99_1.53_10.p
 examples/sphere/__pycache__/random.cpython-38.pyc
 flexa/__pycache__/_utils.cpython-38.pyc
+flexa/__pycache__/_geom_utils.cpython-38.pyc
+tests/__pycache__/test_utils.cpython-38.pyc
+tests/__pycache__/test_geom_utils.cpython-38.pyc
+tests/template.py

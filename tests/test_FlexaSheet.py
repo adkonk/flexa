@@ -1,4 +1,5 @@
 from flexa.FlexaSheet import FlexaSheet
+from flexa._utils import picklify
 import unittest
 
 import numpy as np
@@ -65,9 +66,7 @@ class Test_FlexaSheet(unittest.TestCase):
         self.assertEqual(self.f.phi0, self.f.aphi(self.r))
         self.assertEqual(self.f.psi0, self.f.apsi(self.r))
 
-    def test_flatgen(self):
-        lattice = np.array([[0, 0], [0, 1], [1, 0]])
-        self.assertEqual(FlexaSheet.flatgen(lattice).n_cells, 3)
+    # TODO: test vorgen, flatgen, etc
 
     def test_cellgraph(self):
         G = nx.Graph()
@@ -86,58 +85,6 @@ class Test_FlexaSheet(unittest.TestCase):
 
     def test_cell_degrees(self):
         self.assertEqual(self.f.cell_degrees(), {i: 3 for i in range(3)})
-
-    def test_angle(self):
-        self.assertEqual(FlexaSheet.angle([1, 0, 0], [0, 1, 0]), np.pi / 2)
-
-    def test_align(self):
-        ref = np.array([0, 0, 1])
-
-        a = np.array([1, 1, 1])
-        self.assertArrayEqual(FlexaSheet.align(a, ref), a)
-
-        a = np.array([0, 1, 0])
-        self.assertArrayEqual(FlexaSheet.align(a, ref), a)
-
-        a = np.array([-1, -1, -1])
-        self.assertTrue(np.dot(a, ref) < 0)
-        self.assertArrayEqual(FlexaSheet.align(a, ref), a)
-
-    def test_tri_normal(self):
-        ref = np.array([0, 0, 1])
-        a = np.array([0, 1])
-        b = np.array([1, 0])
-        c = np.array([1, 1])
-        self.assertArrayEqual(FlexaSheet.tri_normal(a, b, c, ref), ref)
-
-        self.assertArrayEqual(FlexaSheet.tri_normal(np.vstack((a, b, c))), ref)
-
-        a = np.array([0, 1, 0])
-        b = np.array([1, 0, 0])
-        c = np.array([0, 0, 1])
-        n = np.array([1, 1, 1]) / np.sqrt(3)
-        self.assertArrayEqual(FlexaSheet.tri_normal(a, b, c, ref), n)
-
-        self.assertArrayEqual(
-            FlexaSheet.tri_normal(a, b, c, ref), n)
-        
-        ref = np.array([0, 0, -1])
-        self.assertArrayEqual(
-            FlexaSheet.tri_normal(np.vstack((a, b, c)), ref=ref), -1 * n)
-
-    def test_face_normal(self):
-        n_points = 8 # must be even
-        angles = np.linspace(0, 2 * np.pi, n_points, endpoint=False)
-        z = np.where(np.arange(n_points) % 2 == 0, 1, -1)
-        r = np.vstack((np.cos(angles), np.sin(angles), z)).T
-
-        ref = np.array([1, 1, 1])
-        expected = np.array([0, 0, 1])
-        self.assertArrayEqual(FlexaSheet.face_normal(r, ref), expected, 
-            atol=1e-10)
-
-        self.assertArrayEqual(FlexaSheet.face_normal(r, -ref), -expected, 
-            atol=1e-10)
 
     def test_cell_normal(self):
         ref = np.array([0, 0, 1])
@@ -228,12 +175,6 @@ class Test_FlexaSheet(unittest.TestCase):
         f2.x[0] = 999
         self.assertFalse(self.f == f2)
 
-    def test_picklify(self):
-        base = 'hello'
-        expected = base + '.p'
-        self.assertEqual(FlexaSheet.picklify(base), expected)
-        self.assertEqual(FlexaSheet.picklify(expected), expected)
-
     def test_save_load(self):
         f2 = FlexaSheet(self.f.G)
         dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -244,7 +185,7 @@ class Test_FlexaSheet(unittest.TestCase):
         self.assertEqual(f_load, self.f) # generating object
         self.assertEqual(f_load, f2) # equivalent object
 
-        os.remove(FlexaSheet.picklify(tmp_path))
+        os.remove(picklify(tmp_path))
     
 if __name__ == '__main__':
     unittest.main()
