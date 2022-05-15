@@ -19,13 +19,15 @@ path = save_folder_path('plots')
 # This probably has to do with collar vertices overlapping with z positions
 # as the icosphere curves radially in
 # No errors when solving shape though!
-v, f = ico(3, radius=2, angle=3*np.pi/5)
+v, f = ico(2, radius=2, angle=3*np.pi/5)
 
 s = FlexaSheet.facegen(v, f, z=0.5, ref='ori',
     phi0=0.654, psi0=0.8375, ell0=1, silent=1)
+plt.figure(figsize=(20,10))
 s.draw('3d')
 plt.savefig(path + '/init.png', dpi=200)
 
 s.solve_shape(10)
+plt.figure(figsize=(20,10))
 s.draw('3d')
 plt.savefig(path + '/final.png', dpi=200)

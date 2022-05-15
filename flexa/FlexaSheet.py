@@ -1,3 +1,4 @@
+from statistics import NormalDist
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
@@ -96,6 +97,7 @@ class FlexaSheet(object):
 			if self.constrained: # all initial lengths must == ell0 if constr
 				assert np.all(self.collar_lengths(r) == ell0)
 			self.ell0 = ell0
+		# self.s0 = self.sector_angles(r)
 		
 		if silent == 0: # print stats
 			print('\nInitial energies')
@@ -397,15 +399,21 @@ class FlexaSheet(object):
 		"""Returns normal vector corresponding to a cell based on its collars"""
 		rcis = r[self.cell_collars[cell], :]
 		rc = r[cell, :]
-		return(face_normal(rcis, ref=np.sum(rcis - rc, axis=0)))
+		n = np.sum(rcis - rc, axis=0)
+		return n / np.linalg.norm(n)
+		# return(face_normal(rcis, ref=np.sum(rcis - rc, axis=0)))
 	
+	def cell_normals(self, r):
+		return {c: self.cell_normal(r, c) for c in self.cell_collars.keys()}
+
 	# calculating the energies
-	def phis(self, r):
+	def phis(self, r, normals=None):
 		"""Returns {cell: [phi angles for cell's collar nodes]}"""
+		if normals is None:
+			normals = self.cell_normals(r)
 		ps = {}
 		for (c, collar_nodes) in self.cell_collars.items():
-			n = self.cell_normal(r, c)
-			ps[c] = np.array([angle(n, r[ci,:] - r[c,:]) \
+			ps[c] = np.array([angle(normals[c], r[ci,:] - r[c,:]) \
 			  for ci in collar_nodes])
 		return(ps)
 	
@@ -417,23 +425,24 @@ class FlexaSheet(object):
 		n = sum(self.cell_degrees().values())
 		return(phi_tot / n)
 	
-	def phi_energies(self, r):
+	def phi_energies(self, r, normals=None):
 		"""Returns dictionary of phi energy for each cells"""
 		return({i: np.sum((phis_c - self.phi0) ** 2) \
-				for (i, phis_c) in self.phis(r).items()})
+				for (i, phis_c) in self.phis(r, normals).items()})
 	
-	def phi_energy(self, r):
+	def phi_energy(self, r, normals=None):
 		"""Returns phi energy for whole sheet"""
-		e = sum(self.phi_energies(r).values())
+		e = sum(self.phi_energies(r, normals).values())
 		return(e)
 	
-	def psis(self, r):
+	def psis(self, r, normals=None):
 		"""Returns dictionary {(cell1, cell2): psi}"""
 		ps = {}
+		if normals is None:
+			normals = self.cell_normals(r)
 		for (cells, collars) in self.neigh_collars.items():
 			# cell normal 1
-			n1 = np.sum(r[self.cell_collars[cells[0]], :] - r[cells[0], :], 
-						axis=0) # more efficient than face_normal
+			n1 = normals[cells[0]]
 			
 			# find normal vector a for cell 1 to shared collar boundary
 			c11 = r[collars[0], :] - r[cells[0], :]
@@ -444,8 +453,7 @@ class FlexaSheet(object):
 			# repeat for cell 2
 			c21 = r[collars[0], :] - r[cells[1], :]
 			c22 = r[collars[1], :] - r[cells[1], :]
-			n2 = np.sum(r[self.cell_collars[cells[1]], :] - r[cells[1], :], 
-						axis=0)
+			n2 = normals[cells[1]]
 			b = np.cross(c21, c22) # collar-(cell 2)-collar normal
 			b = align(b, n2)
 	
@@ -462,14 +470,15 @@ class FlexaSheet(object):
 		n = len(self.neigh_collars)
 		return(psi_tot / n)
 	
-	def psi_energies(self, r):
+	def psi_energies(self, r, normals=None):
 		"""Returns {(cell1, cell2): psi energy = (psi - psi0) ** 2}"""
 		return({uv: (psi - self.psi0) ** 2 \
-				for (uv, psi) in self.psis(r).items()})
+				for (uv, psi) in self.psis(r, normals).items()})
 	
-	def psi_energy(self, r):
+	def psi_energy(self, r, normals=None):
 		"""Returns whole sheet psi energy"""
-		e = sum([(psi - self.psi0) ** 2 for psi in self.psis(r).values()])
+		e = sum([(psi - self.psi0) ** 2 \
+			for psi in self.psis(r, normals).values()])
 		return(e)
 
 	def collar_lengths(self, r):
@@ -481,11 +490,32 @@ class FlexaSheet(object):
 		"""Returns whole sheet cell-collar length energy"""
 		return(np.sum((self.collar_lengths(r) - self.ell0) ** 2))
 
+	def sector_angles(self, r, normals=None):
+		if normals is None:
+			normals = self.cell_normals(r)
+		def angleacb(a, cell, b):
+			return(angle(a - cell, b - cell))
+		def sectors(e, v):
+			c11 = closest_point_plane_eq(r[e[0], :], normals[e[0]], r[v[0]])
+			c12 = closest_point_plane_eq(r[e[0], :], normals[e[0]], r[v[1]])
+
+			c21 = closest_point_plane_eq(r[e[1], :], normals[e[1]], r[v[0]])
+			c22 = closest_point_plane_eq(r[e[1], :], normals[e[1]], r[v[1]])
+			return angleacb(c11, r[e[0], :], c12), \
+				angleacb(c21, r[e[1], :], c22)
+		vals = [sectors(e, v) for (e, v) in self.neigh_collars.items()]
+		return np.array(vals)
+
+	def sector_energy(self, r, normals=None):
+		return(np.sum((self.sector_angles(r, normals) - self.s0) ** 2))
+
 	def energy(self, x, k=0):
 		"""Returns sum of whole sheet energies with spring energy times k"""
 		r = x.reshape((-1, 3))
-		e = self.phi_energy(r) + self.psi_energy(r)
+		normals = self.cell_normals(r)
+		e = self.phi_energy(r, normals) + self.psi_energy(r, normals)
 		e += k * self.spring_energy(r) 
+		# e += self.sector_energy(r, normals)
 		return(e)   
 	 
 	# simulate
@@ -493,33 +523,47 @@ class FlexaSheet(object):
 		"""Minimise (with self.constrained) sheet energy (spring constant k)"""
 		# silent 0: complete info, 1: time elapsed only, 2: nothing
 		n_edges = self.collar_edges.shape[0]
-		 
-		# Jacobian matrix of the above function
-		def J_collar_lengths(x):
-			r = x.reshape((-1, 3))
-			J = np.zeros((n_edges, self.n, 3))
-			J[np.arange(n_edges), self.collar_edges[:, 0], :] = \
-				2 * (r[self.collar_edges[:, 0], :] - \
-					 r[self.collar_edges[:, 1], :])
-			J[np.arange(n_edges), self.collar_edges[:, 1], :] = \
-				-1 * J[np.arange(n_edges), self.collar_edges[:, 0], :]
-			return(J.reshape((n_edges, 3 * self.n)))
 			
 		# defining the constraint in scipy format
+		fixed_cell = 0 # fix a cell position
+		r_fixed = self.x.reshape(-1, 3)[fixed_cell, :]
+		n_fixed = self.cell_normal(self.x.reshape(-1, 3), fixed_cell)
+		J_fixed_cell = np.zeros((3, 3 * self.n))
+		J_fixed_cell[:, fixed_cell * 3 + np.arange(3)] = np.eye(3)
+
+		eq_cons = []
+		method = 'SLSQP'
+		eq_cons = [{'type': 'eq',
+			'fun': lambda x: x[fixed_cell * 3 + np.arange(3)] - r_fixed,
+			'jac': lambda x: J_fixed_cell}]
+		eq_cons.append({'type': 'eq',
+			'fun': lambda x: self.cell_normal(x.reshape(-1, 3), fixed_cell) - n_fixed})
+		# method = 'BFGS'
 		if self.constrained:
-			eq_cons = {'type': 'eq',
-					   'fun': lambda x:
-						   self.collar_lengths(x.reshape((-1, 3))) - self.ell0,
-					   'jac': lambda x: J_collar_lengths(x)}
+			# Jacobian matrix of the above function
+			def J_collar_lengths(x):
+				r = x.reshape((-1, 3))
+				J = np.zeros((n_edges, self.n, 3))
+				J[np.arange(n_edges), self.collar_edges[:, 0], :] = \
+					2 * (r[self.collar_edges[:, 0], :] - \
+						r[self.collar_edges[:, 1], :])
+				J[np.arange(n_edges), self.collar_edges[:, 1], :] = \
+					-1 * J[np.arange(n_edges), self.collar_edges[:, 0], :]
+				return(J.reshape((n_edges, 3 * self.n)))
+			
+			eq_cons.append({'type': 'eq',
+				'fun': lambda x: 
+					self.collar_lengths(x.reshape((-1, 3))) - self.ell0,
+				'jac': lambda x: J_collar_lengths(x)})
+			method = 'SLSQP'
 			assert k == 0
-		else: eq_cons = []
 		# blasting it with the minimisation routine
 		if silent == 0:
 			print('\nBeginning solver')
 		t = time.time()
 		res = minimize(
-				self.energy, self.x, method='SLSQP', 
-				args = (k),
+				lambda x: self.energy(x, k), self.x, 
+				method=method, 
 				constraints = eq_cons
 				)
 		if silent in [0, 1]:

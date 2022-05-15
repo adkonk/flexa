@@ -72,10 +72,19 @@ def ico(ndiv, radius=5, angle=np.pi/3, lift=False):
     """
     v, f = icosphere(ndiv)
     
+    x = (1 + np.sqrt(5)) / 2
+    pt = np.array([0, -1, x]) / np.sqrt(1 + x ** 2)
+    phi = np.dot(np.array([0, -1, 0]), pt) / np.linalg.norm(pt)
+    rot = np.eye(3)
+    rot[np.ix_([1, 2], [1, 2])] = np.array([[np.cos(phi), -np.sin(phi)], 
+        [np.sin(phi), np.cos(phi)]])
+    v = v @ rot.T
+
     # trim v
     keep_v = np.arccos(-v[:, 2] / np.linalg.norm(v, axis=1)) <= angle
     v = v[keep_v, :]
     v *= radius
+
     if lift: v[:, 2] += radius
 
     # trim f
