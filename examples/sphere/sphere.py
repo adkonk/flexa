@@ -24,7 +24,7 @@ def get_sheet(s, name, phi0, psi0, ell0, k, dir_path = save_dir):
 
 name = 'sph'
 np.random.seed(3)
-points = flexa.lattice.random_sphere_points(50, radius = 1, angle=np.pi/3)
+points = flexa.lattice.random_sphere_points(30, radius = 1, angle=np.pi/3)
 # phi0, psi0 = average phi, psi
 s = FlexaSheet.vorgen(points, silent=0, z=0.3, ref = 'ori')
 
@@ -37,13 +37,17 @@ psis = np.linspace(-range, range, n) + s.psi0
 # phis = phis[3:(3+n)]
 # psis = psis[2:(2+n)]
 
-ell0 = s.ell0
+ell0 = np.mean(s.ell0)
 k = 10
 
 energies = np.zeros((n, n))
 inds = spiral_inds(energies)[::-1, :] # spiral order starting from center
 
 s_init = get_sheet(s, name, phis[inds[0, 0]], psis[inds[0, 1]], ell0, k)
+s_init.draw('3d')
+plt.show()
+
+#good = np.zeros((n,n))
 
 for ri in np.arange(inds.shape[0]):
     phi_i, psi_i = inds[ri, :]
@@ -51,8 +55,14 @@ for ri in np.arange(inds.shape[0]):
         (ri + 1, inds.shape[0], phis[phi_i], psis[psi_i]))
     
     s = get_sheet(s_init, name, phis[phi_i], psis[psi_i], ell0, k)
+    #s.draw('3d')
+    #plt.show()
+    #good[phi_i, psi_i] = int(input('good? '))
+    #np.save('good.npy', good)
     energies[phi_i, psi_i] = s.energy(s.x, k)
     print(energies[phi_i, psi_i])
+
+np.save('energies.npy', energies)
 
 plt.figure(figsize=(12,12))
 meshplotter(phis, psis, energies, 
