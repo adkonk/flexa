@@ -1,6 +1,7 @@
 from flexa.lattice import hex_lattice, hex_with_kink, \
     hex_with_bump
 from flexa.FlexaSheet import FlexaSheet
+from flexa._utils import picklify
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -21,7 +22,7 @@ def nameroot(name, phi0, psi0, ell0, k):
 
 def file_path(save_folder_path, name, phi0, psi0, ell0, k):
     fname = nameroot(name, phi0, psi0, ell0, k)
-    fpath = os.path.join(save_folder_path, FlexaSheet.picklify(fname))
+    fpath = os.path.join(save_folder_path, picklify(fname))
     return(fpath)
 
 def spiral_inds(X):

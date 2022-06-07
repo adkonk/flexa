@@ -7,6 +7,7 @@ from scipy.optimize import minimize
 from scipy.stats import rankdata
 import time
 import pickle
+import os.path
 
 from flexa._utils import *
 from flexa._geom_utils import *
@@ -79,10 +80,11 @@ class FlexaSheet(object):
 		# dict {(cell1, cell2): (collar node 1, collar node 2)}
 		self.neigh_collars = nx.get_edge_attributes(G, 'collar_pts')
 		
+		# TODO: be certain this is always (cell, collar node)
 		# list of (cell, collar node) or (collar node, cell)
 		self.collar_edges = np.array(
 			[(e[0], e[1]) for e in self.G.edges.data('collar') if e[2]])
-		
+
 		if phi0 is None: # phi0 = average initial phi0
 			self.phi0 = self.aphi(r)
 		else: self.phi0 = phi0
@@ -96,7 +98,7 @@ class FlexaSheet(object):
 			if self.constrained: # all initial lengths must == ell0 if constr
 				assert np.all(self.collar_lengths(r) == ell0)
 			self.ell0 = ell0
-		
+
 		if silent == 0: # print stats
 			print('\nInitial energies')
 			self.energy_stats(r)
@@ -393,19 +395,35 @@ class FlexaSheet(object):
 		return({c: len(collars) for (c, collars) in self.cell_collars.items()})
 	
 	## simulation
+	def degree(self, n):
+		if isinstance(n, int):
+			return len(self.cell_collars[n])
+		else:
+			return [len(self.cell_collars[c]) for c in n]
+
 	def cell_normal(self, r, cell):
 		"""Returns normal vector corresponding to a cell based on its collars"""
 		rcis = r[self.cell_collars[cell], :]
 		rc = r[cell, :]
-		return(face_normal(rcis, ref=np.sum(rcis - rc, axis=0)))
+		n = np.sum(rcis - rc, axis=0)
+		return n / np.linalg.norm(n)
+		# return(face_normal(rcis, ref=np.sum(rcis - rc, axis=0)))
 	
+	def cell_normals(self, r):
+		return {c: self.cell_normal(r, c) for c in self.cell_collars.keys()}
+
+	def _cell_normals_array(self, r):
+		return np.array([self.cell_normal(r, c) for c in \
+			self.collar_edges[:, 0]])
+
 	# calculating the energies
-	def phis(self, r):
+	def phis(self, r, normals=None):
 		"""Returns {cell: [phi angles for cell's collar nodes]}"""
+		if normals is None:
+			normals = self.cell_normals(r)
 		ps = {}
 		for (c, collar_nodes) in self.cell_collars.items():
-			n = self.cell_normal(r, c)
-			ps[c] = np.array([angle(n, r[ci,:] - r[c,:]) \
+			ps[c] = np.array([angle(normals[c], r[ci,:] - r[c,:]) \
 			  for ci in collar_nodes])
 		return(ps)
 	
@@ -417,23 +435,33 @@ class FlexaSheet(object):
 		n = sum(self.cell_degrees().values())
 		return(phi_tot / n)
 	
-	def phi_energies(self, r):
+	def phi_energies(self, r, normals=None):
 		"""Returns dictionary of phi energy for each cells"""
-		return({i: np.sum((phis_c - self.phi0) ** 2) \
-				for (i, phis_c) in self.phis(r).items()})
+		return({c: np.sum((phis_ci - self.phi0) ** 2) \
+				for (c, phis_ci) in self.phis(r, normals).items()})
 	
-	def phi_energy(self, r):
+	def _phis_array(self, r, normals=None):
+		ps = np.zeros(self.collar_edges.shape[0])
+		if normals is None:
+			normals = self.cell_normals(r)
+		for i in range(len(ps)):
+			c, ci = self.collar_edges[i, :]
+			ps[i] = angle(normals[c], r[ci,:] - r[c,:])
+		return ps
+
+	def phi_energy(self, r, normals=None):
 		"""Returns phi energy for whole sheet"""
-		e = sum(self.phi_energies(r).values())
+		e = sum(self.phi_energies(r, normals).values())
 		return(e)
 	
-	def psis(self, r):
+	def psis(self, r, normals=None):
 		"""Returns dictionary {(cell1, cell2): psi}"""
 		ps = {}
+		if normals is None:
+			normals = self.cell_normals(r)
 		for (cells, collars) in self.neigh_collars.items():
 			# cell normal 1
-			n1 = np.sum(r[self.cell_collars[cells[0]], :] - r[cells[0], :], 
-						axis=0) # more efficient than face_normal
+			n1 = normals[cells[0]]
 			
 			# find normal vector a for cell 1 to shared collar boundary
 			c11 = r[collars[0], :] - r[cells[0], :]
@@ -444,8 +472,7 @@ class FlexaSheet(object):
 			# repeat for cell 2
 			c21 = r[collars[0], :] - r[cells[1], :]
 			c22 = r[collars[1], :] - r[cells[1], :]
-			n2 = np.sum(r[self.cell_collars[cells[1]], :] - r[cells[1], :], 
-						axis=0)
+			n2 = normals[cells[1]]
 			b = np.cross(c21, c22) # collar-(cell 2)-collar normal
 			b = align(b, n2)
 	
@@ -455,6 +482,10 @@ class FlexaSheet(object):
 			ps[cells] = psi / 2
 		return(ps)
 	
+	def _psis_array(self, r, normals=None):
+		ps = self.psis(r, normals)
+		return np.array([ps[cells] for cells in self.neigh_collars.keys()])
+
 	def apsi(self, r):
 		"""Returns average psi for whole sheet"""
 		ps = self.psis(r)
@@ -462,14 +493,15 @@ class FlexaSheet(object):
 		n = len(self.neigh_collars)
 		return(psi_tot / n)
 	
-	def psi_energies(self, r):
+	def psi_energies(self, r, normals=None):
 		"""Returns {(cell1, cell2): psi energy = (psi - psi0) ** 2}"""
 		return({uv: (psi - self.psi0) ** 2 \
-				for (uv, psi) in self.psis(r).items()})
+				for (uv, psi) in self.psis(r, normals).items()})
 	
-	def psi_energy(self, r):
+	def psi_energy(self, r, normals=None):
 		"""Returns whole sheet psi energy"""
-		e = sum([(psi - self.psi0) ** 2 for psi in self.psis(r).values()])
+		e = sum([(psi - self.psi0) ** 2 \
+			for psi in self.psis(r, normals).values()])
 		return(e)
 
 	def collar_lengths(self, r):
@@ -481,16 +513,18 @@ class FlexaSheet(object):
 		"""Returns whole sheet cell-collar length energy"""
 		return(np.sum((self.collar_lengths(r) - self.ell0) ** 2))
 
-	def energy(self, x, k=0):
-		"""Returns sum of whole sheet energies with spring energy times k"""
+	def energy(self, x, k=(1, 2, 0)):
+		"""Returns sum of whole sheet energies times energy constants k"""
 		r = x.reshape((-1, 3))
-		e = self.phi_energy(r) + self.psi_energy(r)
-		e += k * self.spring_energy(r) 
-		return(e)   
+		normals = self.cell_normals(r)
+		e = k[0] * self.phi_energy(r, normals) + \
+			k[1] * self.psi_energy(r, normals) + \
+			k[2] * self.spring_energy(r) 
+		return(e)  
 	 
 	# simulate
-	def solve_shape(self, k=0, silent=0):
-		"""Minimise (with self.constrained) sheet energy (spring constant k)"""
+	def solve_shape(self, k=(1, 2, 0), silent=0):
+		"""Minimise (with self.constrained) sheet energy (energy constants k)"""
 		# silent 0: complete info, 1: time elapsed only, 2: nothing
 		n_edges = self.collar_edges.shape[0]
 		 
@@ -511,7 +545,7 @@ class FlexaSheet(object):
 					   'fun': lambda x:
 						   self.collar_lengths(x.reshape((-1, 3))) - self.ell0,
 					   'jac': lambda x: J_collar_lengths(x)}
-			assert k == 0
+			assert k[2] == 0
 		else: eq_cons = []
 		# blasting it with the minimisation routine
 		if silent == 0:
@@ -531,7 +565,189 @@ class FlexaSheet(object):
 			print('\nFinal energies')
 			self.energy_stats(self.x.reshape((-1, 3)))
 		return(res)
-	 
+	
+	def _graph_delta_mxs(self):
+		# (self.n, n_cc) kronecker deltas
+		# can also do (arange[:, None] == cells[None, :])
+		dga_cc = np.equal.outer( 
+			np.arange(self.n), self.collar_edges[:, 0]).astype('int')
+		dgp_cc = np.equal.outer(
+			np.arange(self.n), self.collar_edges[:, 1]).astype('int')
+
+		# array of (cell1, cell2, collar1, collar2)
+		abps = np.array([(cells[0], cells[1], collars[0], collars[1]) for \
+			(cells, collars) in self.neigh_collars.items()])
+		dga = np.equal.outer(np.arange(self.n), abps[:, 0]).astype('int')
+		dgb = np.equal.outer(np.arange(self.n), abps[:, 1]).astype('int')
+		dgp = np.equal.outer(np.arange(self.n), abps[:, 2]).astype('int')
+		dgs = np.equal.outer(np.arange(self.n), abps[:, 3]).astype('int')
+
+		return(dga_cc, dgp_cc, abps, dga, dgb, dgp, dgs)
+
+	def grad(self, k, deltas=None):
+		""" Computes gradient of energy with energy constants k"""
+
+		# Naming convention: 
+		# 	a, b: cell indices
+		# 	p, s: collar indices
+		# 	n: cell normal vector
+		# 	m: collar-cell-collar normal vector
+		#	_cc: cell-collar (columns indexed by cell-collar pair as in rows
+		# 		self.collar_edges)
+
+		r = self.x.reshape(-1, 3)
+		normals = self.cell_normals(r)
+		def rowwise_dot(a, b, **kwargs):
+			return np.sum(a * b, axis=1, **kwargs)
+
+		## dphiE / dr
+
+		# d(ap_hat)_j / dr dot n
+		
+		# cell to collar vectors \vec{ap} array (n_cc, 3)
+		ap = r[self.collar_edges[:, 1], :] - r[self.collar_edges[:, 0], :] 
+		ap_norm = np.linalg.norm(ap, axis=1, keepdims=True)
+		ap_hat = ap / ap_norm
+
+		n = np.array([normals[c] for c in self.collar_edges[:, 0]])
+
+		# (n_cc, ) factor in dap/dr dot n
+		dphi = -1 * (self._phis_array(r, normals=normals) - self.phi0) / \
+			np.sqrt(1 - rowwise_dot(n, ap_hat) ** 2)
+
+		# d\vec{ap}/d\vec{r}_gamma dot \vec{n}_gamma for all gamma
+		dapdr_n = 1 / ap_norm * \
+			(n - ap_hat * rowwise_dot(n, ap_hat, keepdims=True))
+		dapdr_n *= dphi[:, np.newaxis]
+
+		dga_cc = deltas[0]
+		dgp_cc = deltas[1]
+
+		# (self.n, n_cc) * (n_cc, 3) --> (self.n, 3) gradient
+		dphiE_dr = np.matmul(dgp_cc - dga_cc, dapdr_n)
+
+		# d(n)_j / dr dot ap_hat
+
+		norms = {c: np.linalg.norm(np.sum(r[ci, :] - r[c, :], axis=0)) \
+			for (c, ci) in self.cell_collars.items()}
+		denom = np.array([norms[c] \
+			for c in self.collar_edges[:, 0]])[:, np.newaxis]
+		dndr_aphat = 1 / denom * \
+			(ap_hat - n * (rowwise_dot(n, ap_hat, keepdims=True)))
+
+		dndr_aphat *= dphi[:, np.newaxis]
+
+		degs = self.cell_degrees()
+		degs = np.array([degs[c] for c in self.collar_edges[:, 0]])
+
+		# need to make array with rows of self.cell_collars but 
+		# self.cell_collars is ragged so fill all the extra entries with 
+		# self.n, which we know will not be equal to any element in
+		# np.arange(self.n)
+		collar_inds = np.full((self.collar_edges.shape[0], np.amax(degs)), 
+			self.n)
+		for ci in np.arange(self.collar_edges.shape[0]):
+			c = self.collar_edges[ci, 0]
+			collar_inds[ci, :len(self.cell_collars[c])] = self.cell_collars[c]
+
+		# (self.n, n_cc) array with 1s whenever rowindex is in 
+		# the list self.cell_collars[rowindex]
+		#
+		# (self.n, 1, 1) * (1, n_cc, max(degs)) --> (self.n, n_cc, max(degs))
+		# --- sum over last axis ---> (self.n, n_cc)
+		is_collar_in_cell = (np.arange(self.n)[:, np.newaxis, np.newaxis] == \
+			collar_inds[np.newaxis, :, :]).sum(-1)
+
+		dphiE_dr += np.matmul(-dga_cc * degs + is_collar_in_cell, dndr_aphat)
+
+		## dspringE_dr
+		# Hooke's law: (r - r0) * rhat
+		dell = (ap_norm - self.ell0) * ap_hat
+		dspringE_dr = np.matmul(dgp_cc - dga_cc, dell)
+
+		## dpsiE_dr
+		abps, dga, dgb, dgp, dgs = deltas[2:]
+
+		na = np.array([normals[c] for c in abps[:, 0]])
+		nb = np.array([normals[c] for c in abps[:, 1]])
+
+		rap = r[abps[:, 2], :] - r[abps[:, 0], :]
+		ras = r[abps[:, 3], :] - r[abps[:, 0], :]
+		rbp = r[abps[:, 2], :] - r[abps[:, 1], :]
+		rbs = r[abps[:, 3], :] - r[abps[:, 1], :]
+
+		npas_long = np.cross(rap, ras)
+		norm_npas = np.linalg.norm(npas_long, axis=1)
+		Ypas = (np.sign(rowwise_dot(npas_long, na)) / norm_npas)[:, np.newaxis]
+		npas = npas_long * Ypas
+
+		npbs_long = np.cross(rbp, rbs)
+		norm_npbs = np.linalg.norm(npbs_long, axis=1)
+		Ypbs = (np.sign(rowwise_dot(npbs_long, nb)) / norm_npbs)[:, np.newaxis]
+		npbs = npbs_long * Ypbs
+
+		psis = self._psis_array(r, normals=normals)[:, np.newaxis]
+
+		Ypas *= psis - self.psi0
+		Ypbs *= psis - self.psi0
+
+		Xb = rowwise_dot(npas, npbs_long, keepdims=True) / \
+			norm_npas[:, np.newaxis] ** 2
+		bvec = Ypbs * (Xb * npbs_long - npas)
+		dpsiE_dr = np.matmul(dgp - dgb, np.cross(bvec, rbs))
+		dpsiE_dr -= np.matmul(dgs - dgb, np.cross(bvec, rbp))
+
+		Xa = rowwise_dot(npbs, npas_long, keepdims=True) / \
+			norm_npbs[:, np.newaxis] ** 2
+		avec = Ypas * (Xa * npas_long - npbs)
+		dpsiE_dr += np.matmul(dgp - dga, np.cross(avec, ras))
+		dpsiE_dr -= np.matmul(dgs - dga, np.cross(avec, rap))
+
+		return k[0] * dphiE_dr + k[1] * dpsiE_dr + k[2] * dspringE_dr
+
+	def f_equil(self, k, rate=1e-2, tol=1e-4, silent=1,
+			plot=False, plotint=10, plotdir=None, m=0):
+		if plot:
+			fig = plt.gcf()
+			fig.set_size_inches(7, 6)
+			ax = fig.add_subplot(1, 1, 1, projection='3d')
+		
+		t = time.time()
+
+		# stuff for getting dpsiE_dr
+		deltas = self._graph_delta_mxs()
+
+		e_new = self.energy(self.x, k)
+		e_old = e_new * (1 + 2 * tol)
+		n_steps = m
+		while (e_old - e_new) / e_old > tol:
+			g = self.grad(k, deltas=deltas)
+			# g -= np.sum(g, axis=0) / g.shape[0]
+			self.x -= rate * g.flatten()
+			e_old = e_new
+			e_new = self.energy(self.x, k)
+			n_steps += 1
+			if plot and ((n_steps % plotint == 0) or n_steps == 1):
+				ax.clear()
+				ax.set_xlim([-1.5, 1.5])
+				ax.set_ylim([-1.5, 1.5])
+				ax.set_zlim([-2, 1])
+				self.draw('3d', ax=ax)
+				ax.set_title(r'$n=%d$' % n_steps, fontsize=16)
+				fig.tight_layout()
+				plt.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1)
+				fig.savefig(os.path.join(plotdir, '%05d.png' % (int(n_steps / plotint))), dpi=200, bbox_inches='tight')
+			if (silent == 0) and (n_steps % plotint == 0):
+				diff = (e_old - e_new) / e_old
+				print('Step %d, energy %0.5f, decrease %0.2e' % (n_steps, e_new, diff))
+			if (e_old - e_new) / e_old < 0:
+				print('yes')
+
+		if silent in [0, 1]:
+			print('number of steps: ', n_steps)
+			print('time elapsed: %0.2f minutes' % ((time.time() - t) / 60))
+		return(n_steps)
+
 	## shape analysis
 	def plot_energies(self, ):
 		"""Plots phi and psi energies as functions of radius out from x,y=0"""
