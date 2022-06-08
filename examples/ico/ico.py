@@ -1,19 +1,12 @@
-from flexa.FlexaSheet import FlexaSheet
-from flexa.lattice import ico
-
 import numpy as np
 import matplotlib.pyplot as plt
-
 import os
 
-def save_folder_path(folder_name, make=True):
-    parent_dir = os.path.dirname(os.path.realpath(__file__))
-    path = os.path.join(parent_dir, folder_name)
-    if make and not os.path.isdir(path):
-        os.mkdir(path)
-    return(path)
+from flexa.FlexaSheet import FlexaSheet
+from flexa.lattice import ico
+from examples.utils import save_folder_path
 
-path = save_folder_path('plots')
+save_dir = save_folder_path('plots')
 
 # TODO: facegen gives an error when silent=0 and angle > 3*np.pi/5.
 # This probably has to do with collar vertices overlapping with z positions
@@ -24,8 +17,8 @@ v, f = ico(3, radius=2, angle=3*np.pi/5)
 s = FlexaSheet.facegen(v, f, z=0.5, ref='ori',
     phi0=0.654, psi0=0.8375, ell0=1, silent=1)
 s.draw('3d')
-plt.savefig(path + '/init.png', dpi=200)
+plt.savefig(os.path.join(save_dir, 'init.png'), dpi=200)
 
-s.solve_shape(10)
+s.solve_shape((1, 2, 10))
 s.draw('3d')
-plt.savefig(path + '/final.png', dpi=200)
+plt.savefig(os.path.join(save_dir, 'final.png'), dpi=200)

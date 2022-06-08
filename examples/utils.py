@@ -1,24 +1,26 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+from inspect import stack
+
 from flexa.lattice import hex_lattice, hex_with_kink, \
     hex_with_bump
 from flexa.FlexaSheet import FlexaSheet
 from flexa._utils import picklify
 
-import numpy as np
-import matplotlib.pyplot as plt
-import os
-
 name_to_func = {'hex': hex_lattice, 'hexbig': lambda: hex_lattice(15),
                 'kink': hex_with_kink, 'bump': hex_with_bump}
 
 def save_folder_path(folder_name, make=True):
-    parent_dir = os.path.dirname(os.path.realpath(__file__))
+    f = stack()[-1].filename # filename of file save_folder_path called from
+    parent_dir = os.path.dirname(os.path.realpath(f))
     path = os.path.join(parent_dir, folder_name)
     if make and not os.path.isdir(path):
         os.mkdir(path)
     return(path)
 
 def nameroot(name, phi0, psi0, ell0, k):
-    return('%s%0.2f_%0.2f_%0.2f_%d' % (name, phi0, psi0, ell0, k))
+    return('%s%0.2f_%0.2f_%0.2f_%d' % (name, phi0, psi0, ell0, k[2]))
 
 def file_path(save_folder_path, name, phi0, psi0, ell0, k):
     fname = nameroot(name, phi0, psi0, ell0, k)

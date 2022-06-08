@@ -894,3 +894,5 @@ examples/flat/landscape/landscape.png
 tests/template.py
 examples/grad/final.png
 examples/grad/init.png
+examples/ico/landscape
+hex_graph.png

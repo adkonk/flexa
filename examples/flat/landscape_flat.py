@@ -3,12 +3,12 @@ import matplotlib.pyplot as plt
 import os
 
 from flexa.FlexaSheet import FlexaSheet
-from utils_flat import save_folder_path, file_path, name_to_func, spiral_inds, \
-    meshplotter
+from examples.utils import save_folder_path, file_path, name_to_func, \
+    spiral_inds, meshplotter
 
 save_dir = save_folder_path('landscape', make=True)
 
-def get_sheet(s, name, phi0, psi0, ell0, k, dir_path = save_dir):
+def get_sheet(s, name, phi0, psi0, ell0, k, dir_path=save_dir):
     fpath = file_path(save_dir, name, phi0, psi0, ell0, k)
     if os.path.exists(fpath):
         s = FlexaSheet.load(fpath, silent=1)
@@ -30,7 +30,7 @@ phis = np.linspace(-range, range, n) + s.phi0
 psis = np.linspace(-range, range, n) + s.psi0
 
 ell0 = s.ell0[0]
-k = 10
+k = (1, 2, 10)
 
 energies = np.zeros((n, n))
 inds = spiral_inds(energies)[::-1, :] # spiral order starting from center

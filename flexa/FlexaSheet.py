@@ -553,7 +553,7 @@ class FlexaSheet(object):
 		t = time.time()
 		res = minimize(
 				self.energy, self.x, method='SLSQP', 
-				args = (k),
+				args = (k, ),
 				constraints = eq_cons
 				)
 		if silent in [0, 1]:

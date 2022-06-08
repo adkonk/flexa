@@ -2,11 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
-from flexa.lattice import hex_lattice, hexbig_lattice, hex_with_kink, \
-    hex_with_bump
 from collections.abc import Iterable
 from flexa.FlexaSheet import FlexaSheet
-from utils_flat import name_to_func, nameroot, save_folder_path
+from examples.utils import name_to_func, nameroot, save_folder_path
 
 save_dir = save_folder_path('sheetplots', make=True)
 
@@ -20,7 +18,8 @@ def make_graphs(name, params):
     if not isinstance(params[0], Iterable):
         params = [params]
 
-    s = FlexaSheet.flatgen(lattice, params[0][0], params[0][1], params[0][2])
+    s = FlexaSheet.flatgen(lattice, phi0=params[0][0], 
+        psi0=params[0][1], ell0=params[0][2])
     plt.figure(figsize=(10,10))
     s.draw()
     plt.savefig('%s_graph.png' % name, dpi=200)
@@ -29,7 +28,7 @@ def make_graphs(name, params):
         s.phi0 = phi0 
         s.psi0 = psi0
         s.ell0 = ell0
-        s.solve_shape(k)
+        s.solve_shape((1, 2, k))
         
         r = nameroot(name, phi0, psi0, ell0, k)
         
