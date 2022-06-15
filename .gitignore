@@ -896,3 +896,6 @@ examples/grad/final.png
 examples/grad/init.png
 examples/ico/landscape
 hex_graph.png
+examples/sphere/plots/final.png
+examples/dynamics
+examples/grad/*.png
