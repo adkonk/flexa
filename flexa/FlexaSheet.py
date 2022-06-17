@@ -34,7 +34,8 @@ class FlexaSheet(object):
         ell0 (float): equilibrium cell-collar length
         normals (str): option for calculating cell normals
     """
-    def __init__(self, G, phi0=None, psi0=None, ell0=None, normals='lsc', silent=0):
+    def __init__(self, G, phi0=None, psi0=None, ell0=None, normals='free', 
+            silent=0):
         """Create FlexaSheet object
 
         Args:
@@ -54,14 +55,13 @@ class FlexaSheet(object):
                 for each cell-collar edge. Defaults to initial lengths for 
                 each cell-collar edge
             normals (str, optional): option for calculating cell normals.
-                Defaults to 'lsc'.
+                Defaults to 'free'.
                 Options:
                     'avg': uses the unit vector in the direction of average 
                         cell-to-collar vector
                     'lsc': means Least Squares Collar. Finds a least squares
                         plane approximation to collars belonging to each cell
                         and uses the normal vector as the cell normal
-                    TODO: implement 'free'
                     'free': cell normals are their own variable to be 
                         optimised
             silent (int, optional): argument to silence initialisation. Can be 
@@ -93,6 +93,10 @@ class FlexaSheet(object):
             [(e[0], e[1]) for e in self.G.edges.data('collar') if e[2]])
         
         self.normals = normals
+        if self.normals == 'free':
+            n = np.array(list(self.cell_normals(r, mode='lsc').values()))
+            r = np.append(r, n, axis=0)
+            self.x = np.append(self.x, n.flatten())
 
         if phi0 is None: # phi0 = average initial phi0
             self.phi0 = self.aphi(r)
@@ -400,16 +404,20 @@ class FlexaSheet(object):
         return({c: len(collars) for (c, collars) in self.cell_collars.items()})
     
     ## simulation
-    def degree(self, n):
-        if isinstance(n, int):
-            return len(self.cell_collars[n])
+    def cell_degree(self, c):
+        if isinstance(c, int):
+            return len(self.cell_collars[c])
         else:
-            return [len(self.cell_collars[c]) for c in n]
+            return [len(self.cell_collars[cell]) for cell in c]
 
     def cell_normal(self, r, cell, mode=None):
         """Returns normal vector corresponding to a cell based on its collars"""
         if mode is None:
             mode = self.normals
+        
+        if mode == 'free':
+            return r[self.n + cell, :]
+
         rcis = r[self.cell_collars[cell], :]
         rc = r[cell, :]
         if mode == 'avg':
@@ -418,15 +426,16 @@ class FlexaSheet(object):
         elif mode == 'lsc':
             return(face_normal(rcis, ref=np.sum(rcis - rc, axis=0)))
         else:
-            # TODO: implement free normals
-            raise NotImplementedError('no other modes are written yet')
+            raise NotImplementedError('mode are written yet')
     
     def cell_normals(self, r, mode=None):
         return {c: self.cell_normal(r, c, mode) \
             for c in self.cell_collars.keys()}
 
-    def _cell_normals_array(self, r):
-        return np.array([self.cell_normal(r, c) for c in \
+    def _cell_normals_array(self, r, mode=None):
+        if mode == None and self.normals == 'free':
+            return self.r[self.n:, :][self.collar_edges[:, 0], :]
+        return np.array([self.cell_normal(r, c, mode) for c in \
             self.collar_edges[:, 0]])
 
     # calculating the energies
@@ -454,6 +463,7 @@ class FlexaSheet(object):
                 for (c, phis_ci) in self.phis(r, normals).items()})
     
     def _phis_array(self, r, normals=None):
+        """Returns phis corresponding to rows in self.collar_edges[:, 0]"""
         ps = np.zeros(self.collar_edges.shape[0])
         if normals is None:
             normals = self.cell_normals(r)
@@ -540,7 +550,9 @@ class FlexaSheet(object):
         """Minimise (with constrained) sheet energy (energy constants k)"""
         # silent 0: complete info, 1: time elapsed only, 2: nothing
         n_edges = self.collar_edges.shape[0]
-         
+        
+        # TODO: update numerical optimisation for free cell normals
+
         # Jacobian matrix of the above function
         def J_collar_lengths(x):
             r = x.reshape((-1, 3))
@@ -590,6 +602,23 @@ class FlexaSheet(object):
         dgp_cc = np.equal.outer(
             np.arange(self.n), self.collar_edges[:, 1]).astype('int')
 
+        degs = self.cell_degrees()
+        degs = np.array([degs[c] for c in self.collar_edges[:, 0]])
+
+        # need to make array with rows of self.cell_collars but 
+        # self.cell_collars is ragged so fill all the extra entries with 
+        # self.n, which we know will not be equal to any element in
+        # np.arange(self.n)
+        collar_inds = np.full((self.collar_edges.shape[0], np.amax(degs)), 
+            self.n)
+        for ci in np.arange(self.collar_edges.shape[0]):
+            c = self.collar_edges[ci, 0]
+            collar_inds[ci, :len(self.cell_collars[c])] = self.cell_collars[c]
+
+        is_collar_in_cell = \
+                (np.arange(self.n)[:, np.newaxis, np.newaxis] == \
+                collar_inds[np.newaxis, :, :]).sum(-1)
+
         # array of (cell1, cell2, collar1, collar2)
         abps = np.array([(cells[0], cells[1], collars[0], collars[1]) for \
             (cells, collars) in self.neigh_collars.items()])
@@ -598,13 +627,18 @@ class FlexaSheet(object):
         dgp = np.equal.outer(np.arange(self.n), abps[:, 2]).astype('int')
         dgs = np.equal.outer(np.arange(self.n), abps[:, 3]).astype('int')
 
-        return(dga_cc, dgp_cc, abps, dga, dgb, dgp, dgs)
+        deltas = [degs, dga_cc, dgp_cc, is_collar_in_cell, abps, dga, dgb, \
+            dgp, dgs]
+
+        if self.normals == 'free':
+            collars_to_cells = np.arange(self.n_cells)[:, np.newaxis] == \
+                self.collar_edges[:, 0][np.newaxis, :]
+            deltas.append(collars_to_cells.astype('int'))
+
+        return deltas
 
     def grad(self, k, deltas=None):
         """ Computes gradient of energy with energy constants k"""
-        def rowwise_dot(a, b, **kwargs):
-            return np.sum(a * b, axis=1, **kwargs)
-
         # Naming convention: 
         # 	a, b: cell indices
         # 	p, s: collar indices
@@ -613,14 +647,17 @@ class FlexaSheet(object):
         #	_cc: cell-collar (columns indexed by cell-collar pair as in rows
         # 		self.collar_edges)
 
+        if deltas is None:
+            deltas = self._graph_delta_mxs()
+
         r = self.x.reshape(-1, 3)
-        degs = self.cell_degrees()
+        degs = deltas[0]
         if self.normals == 'lsc':
             # (number of cells, max number of collar nodes to a cell, 3)
             # first axis needs to be number of cell-collar bonds, but we will 
             # just use indexing later to get this so we don't calculate 
             # redundant inverses
-            X = np.zeros((len(degs), max(degs.values()), 3))
+            X = np.zeros((self.n_cells, np.amax(degs), 3))
             # (n_cells, d_max)
             z = np.zeros((X.shape[0], X.shape[1]))
             for i in range(X.shape[0]):
@@ -632,7 +669,8 @@ class FlexaSheet(object):
             XtXinv = np.linalg.inv(X.swapaxes(1, 2) @ X)
             # (n_cells, 3, 3) @ (n_cells, 3, d_max) @ (n_cells, d_max, 1)
             # --> (n_cells, 3, 1) --- squeeze ---> (n_cells, 3)
-            XtXinvXtz = np.squeeze(XtXinv @ X.swapaxes(1, 2) @ z[:, :, np.newaxis])
+            XtXinvXtz = np.squeeze(XtXinv @ X.swapaxes(1, 2) @ \
+                z[:, :, np.newaxis])
             nvec = XtXinvXtz
             nvec[:, 2] = -1 # can get rid of the constant offset estimation
 
@@ -665,42 +703,32 @@ class FlexaSheet(object):
             (n - ap_hat * rowwise_dot(n, ap_hat, keepdims=True))
         dapdr_n *= dphi[:, np.newaxis]
 
-        dga_cc = deltas[0]
-        dgp_cc = deltas[1]
+        dga_cc = deltas[1]
+        dgp_cc = deltas[2]
 
         # (self.n, n_cc) * (n_cc, 3) --> (self.n, 3) gradient
         dphiE_dr = np.matmul(dgp_cc - dga_cc, dapdr_n)
 
         # d(n)_j / dr dot ap_hat
 
-        # TODO: move this block defining is_collar_in_cell into deltas
-        # (calculated outside of grad because it never changes)
-        degs = np.array([degs[c] for c in self.collar_edges[:, 0]])
-
-        # need to make array with rows of self.cell_collars but 
-        # self.cell_collars is ragged so fill all the extra entries with 
-        # self.n, which we know will not be equal to any element in
-        # np.arange(self.n)
-        collar_inds = np.full((self.collar_edges.shape[0], np.amax(degs)), 
-            self.n)
-        for ci in np.arange(self.collar_edges.shape[0]):
-            c = self.collar_edges[ci, 0]
-            collar_inds[ci, :len(self.cell_collars[c])] = self.cell_collars[c]
-
         # (self.n, n_cc) array with 1s whenever rowindex is in 
         # the list self.cell_collars[rowindex]
         #
         # (self.n, 1, 1) * (1, n_cc, d_max) --> (self.n, n_cc, d_max)
         # --- sum over last axis ---> (self.n, n_cc)
+        is_collar_in_cell = deltas[3]
         if self.normals == 'lsc':
+            # remake collar_inds to make ind_ga because I don't want to include
+            # it in deltas
+            collar_inds = np.full((self.collar_edges.shape[0], np.amax(degs)), 
+                self.n)
+            for ci in np.arange(self.collar_edges.shape[0]):
+                c = self.collar_edges[ci, 0]
+                collar_inds[ci, :len(self.cell_collars[c])] = \
+                    self.cell_collars[c]
             # (n, n_cc, d_max)
             ind_ga = np.arange(self.n)[:, np.newaxis, np.newaxis] == \
                 collar_inds[np.newaxis, :, :]
-            is_collar_in_cell = ind_ga.sum(-1)
-        else:
-            is_collar_in_cell = \
-                (np.arange(self.n)[:, np.newaxis, np.newaxis] == \
-                collar_inds[np.newaxis, :, :]).sum(-1)
 
         if self.normals == 'avg':
             norms = {c: np.linalg.norm(np.sum(r[ci, :] - r[c, :], axis=0)) \
@@ -711,7 +739,8 @@ class FlexaSheet(object):
                 (ap_hat - n * (rowwise_dot(n, ap_hat, keepdims=True)))
 
             dndr_aphat *= dphi[:, np.newaxis]
-            dphiE_dr += np.matmul(-dga_cc * degs + is_collar_in_cell, dndr_aphat)
+            dphiE_dr += np.matmul(-dga_cc * degs + is_collar_in_cell, 
+                dndr_aphat)
         elif self.normals == 'lsc':
             # (n, n_cc, 2, 3)
             # axes: 
@@ -739,9 +768,12 @@ class FlexaSheet(object):
             # gets you (n, n_cc, 2)
             db_dr[..., 0] = np.einsum('ijk,lik->lij',
                 XtXinv[self.collar_edges[:, 0], :2, :],
-                is_collar_in_cell[..., np.newaxis] * dXt_drg0[:, np.newaxis, :] - \
-                    np.squeeze((is_collar_in_cell[..., np.newaxis, np.newaxis] * dXtXinv_drg0[:, np.newaxis, ...]) @ \
-                    XtXinvXtz[self.collar_edges[:, 0], :, np.newaxis])
+                is_collar_in_cell[..., np.newaxis] * \
+                    dXt_drg0[:, np.newaxis, :] - \
+                    np.squeeze(
+                        (is_collar_in_cell[..., np.newaxis, np.newaxis] * \
+                         dXtXinv_drg0[:, np.newaxis, ...]) @ \
+                        XtXinvXtz[self.collar_edges[:, 0], :, np.newaxis])
             )
             
             ## derivative wrt r_gamma_y
@@ -762,9 +794,12 @@ class FlexaSheet(object):
             # gets you (n, n_cc, 2)
             db_dr[..., 1] = np.einsum('ijk,lik->lij', 
                 XtXinv[self.collar_edges[:, 0], :2, :],
-                is_collar_in_cell[..., np.newaxis] * dXt_drg1[:, np.newaxis, :] - \
-                    np.squeeze((is_collar_in_cell[..., np.newaxis, np.newaxis] * dXtXinv_drg1[:, np.newaxis, ...]) @ \
-                    XtXinvXtz[self.collar_edges[:, 0], :, np.newaxis])
+                is_collar_in_cell[..., np.newaxis] * \
+                    dXt_drg1[:, np.newaxis, :] - \
+                    np.squeeze(
+                        (is_collar_in_cell[..., np.newaxis, np.newaxis] * \
+                         dXtXinv_drg1[:, np.newaxis, ...]) @ \
+                        XtXinvXtz[self.collar_edges[:, 0], :, np.newaxis])
             )
 
             ## derivative wrt r_gamma_z
@@ -781,17 +816,23 @@ class FlexaSheet(object):
                 ((0, 0), (0, 0), (0, 1), (0, 0)))
 
             dn_dr_part2 = np.einsum('ij,kil->kijl',
-                nvec[self.collar_edges[:, 0], :] / nvec_norm[:, np.newaxis] ** 3, # (n_cc, 3vec)
-                np.einsum('ik,likm->lim', XtXinvXtz[self.collar_edges[:, 0], :2], db_dr) # (n, n_cc, 3)
+                nvec[self.collar_edges[:, 0], :] / \
+                    nvec_norm[:, np.newaxis] ** 3, # (n_cc, 3vec)
+                np.einsum('ik,likm->lim', 
+                    XtXinvXtz[self.collar_edges[:, 0], :2], 
+                    db_dr) # (n, n_cc, 3)
             )
 
             # (n, 3)
             dphiE_dr += np.einsum('ij,kijl->kl',
                 dphi[:, np.newaxis] * ap_hat, # (n_cc, 3vec)
                 dn_dr_part1 - dn_dr_part2) # (n, n_cc, 3vec, 3)
-        else: 
-            # TODO: implement free normals
-            raise NotImplementedError('no other modes are written yet')
+        elif self.normals == 'free':
+            # the only term in dphiE_dr for coordinates r_gamma (up to row 
+            # self.n) is d(ap)_dr dot n_a since n_a is a free variable
+            # 
+            # we will add the (n_cells, 3) cell normal rows at the end
+            pass
 
         ## dspringE_dr
         # Hooke's law: (r - r0) * rhat
@@ -799,7 +840,7 @@ class FlexaSheet(object):
         dspringE_dr = np.matmul(dgp_cc - dga_cc, dell)
 
         ## dpsiE_dr
-        abps, dga, dgb, dgp, dgs = deltas[2:]
+        abps, dga, dgb, dgp, dgs = deltas[4:9]
 
         na = np.array([normals[c] for c in abps[:, 0]])
         nb = np.array([normals[c] for c in abps[:, 1]])
@@ -836,10 +877,49 @@ class FlexaSheet(object):
         dpsiE_dr += np.matmul(dgp - dga, np.cross(avec, ras))
         dpsiE_dr -= np.matmul(dgs - dga, np.cross(avec, rap))
 
+        if self.normals == 'free':
+            collars_to_cells = deltas[9]
+
+            dphiE_dr = np.append(dphiE_dr, 
+                np.matmul(collars_to_cells, dphi[:, np.newaxis] * ap_hat),
+                axis=0)
+            dpsiE_dr = np.append(dpsiE_dr, 
+                np.zeros((self.n_cells, 3)), axis=0)
+            dspringE_dr = np.append(dspringE_dr, 
+                np.zeros((self.n_cells, 3)), axis=0)
+
+        # dpsiE_dr = np.zeros(dpsiE_dr.shape)
+        # dspringE_dr = np.zeros(dspringE_dr.shape)
+
         return k[0] * dphiE_dr + k[1] * dpsiE_dr + k[2] * dspringE_dr
 
     def f_equil(self, k, rate=1e-2, tol=1e-4, silent=1,
             plot=False, plotint=10, plotdir=None, m=0):
+        """Performs (projected) gradient descent on the coordinates in self.x.
+        If self.normals == 'free', then the updated (not necessarily unit) cell
+        normal vectors are projected onto the constraint set where the cell 
+        normals are normalised.
+
+        Prints a message if the energy goes up.
+
+        Args:
+            k (tuple): tuple of energy constants for phi, psi, spring
+            rate (float, optional): rate of gradient descent. Defaults to 1e-2.
+            tol (float, optional): relative change in energy to stop converging.
+                Defaults to 1e-4.
+            silent (int, optional): is algorithm silent or not. 0 to print out 
+                details at every plotint and 1 to be silent. Defaults to 1.
+            plot (bool, optional): option to plot frames at interval plotint. 
+                Defaults to False.
+            plotint (int, optional): plotting interval counted in number of 
+                steps. Defaults to 10.
+            plotdir (str, optional): directory to save plots. Defaults to None.
+            m (int, optional): initial frame number, used for plotting movies
+                with several equilibrations in a row. Defaults to 0.
+
+        Returns: 
+            number of steps before convergence
+        """
         if plot:
             fig = plt.gcf()
             fig.set_size_inches(7, 6)
@@ -847,7 +927,7 @@ class FlexaSheet(object):
         
         t = time.time()
 
-        # stuff for getting dpsiE_dr
+        # matrices describing graph topology that don't change each step
         deltas = self._graph_delta_mxs()
 
         e_new = self.energy(self.x, k)
@@ -855,8 +935,12 @@ class FlexaSheet(object):
         n_steps = m
         while (e_old - e_new) / e_old > tol:
             g = self.grad(k, deltas=deltas)
-            # g -= np.sum(g, axis=0) / g.shape[0]
             self.x -= rate * g.flatten()
+            if self.normals == 'free':
+                # normalise free cell normals 
+                self.x[(3 * self.n):] /= \
+                    np.repeat(np.linalg.norm(
+                        self.x[(3 * self.n):].reshape(-1, 3), axis=1), 3)
             e_old = e_new
             e_new = self.energy(self.x, k)
             n_steps += 1
@@ -869,12 +953,16 @@ class FlexaSheet(object):
                 ax.set_title(r'$n=%d$' % n_steps, fontsize=16)
                 fig.tight_layout()
                 plt.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1)
-                fig.savefig(os.path.join(plotdir, '%05d.png' % (int(n_steps / plotint))), dpi=200, bbox_inches='tight')
+                fig.savefig(
+                    os.path.join(plotdir, 
+                        '%05d.png' % (int(n_steps / plotint))), 
+                    dpi=200, bbox_inches='tight')
             if (silent == 0) and (n_steps % plotint == 0):
                 diff = (e_old - e_new) / e_old
-                print('Step %d, energy %0.5f, decrease %0.2e' % (n_steps, e_new, diff))
+                print('Step %d, energy %0.5f, decrease %0.2e' % \
+                    (n_steps, e_new, diff))
             if (e_old - e_new) / e_old < 0:
-                print('yes')
+                print('increase in energy!')
 
         if silent in [0, 1]:
             print('number of steps: ', n_steps)
@@ -1007,7 +1095,8 @@ class FlexaSheet(object):
                         so closer to camera is more transparent. Defaults to 
                         False.
                 """
-                xflines = r.reshape(-1, 1, 3) # format for lines, idk why
+                # format for lines, idk why
+                xflines = r.reshape(-1, 1, 3) 
                 
                 azim = np.deg2rad(ax.azim)
                 elev = np.deg2rad(ax.elev)
@@ -1032,38 +1121,29 @@ class FlexaSheet(object):
                 ax_given = False
             ax.view_init(10, 20)
             
-            # extra plotting options that aren't currently used
-            '''# plot cell-cell connections
-            ax.plot_trisurf(r[:self.n_cells, 0], 
-                            r[:self.n_cells, 1], 
-                            r[:self.n_cells, 2],
-                            cmap='spring', edgecolor='black', alpha=0)
-            
-            # plot cell bodies
-            cs = linecolors(r[:self.n_cells, :], plot_center(ax), 
-                np.deg2rad(ax.azim), np.deg2rad(ax.elev), 
-                color=np.array([1, 0, 0]), maxalpha=0.5, rev=True)
-            ax.scatter3D(r[:self.n_cells, 0], 
-                         r[:self.n_cells, 1], 
-                         r[:self.n_cells, 2],
-                         c=cs, s=300)
-            '''
-
             # plot cell-collar connections
-            c = colored_line_collection(r, self.collar_edges, collarcolor, ax,
-                maxalpha=0.1, rev=True)
+            c = colored_line_collection(r[:self.n, :], self.collar_edges, 
+                collarcolor, ax, maxalpha=0.1, rev=True)
             ax.add_collection3d(c)
 
-            # plot collar boundaries
-            ax.scatter3D(r[self.n_cells:, 0], # pyplot handles the alpha
-                         r[self.n_cells:, 1], # on this one by itself
-                         r[self.n_cells:, 2])
+            # plot cell normals
+            if self.normals == 'free':
+                colors = c.get_edgecolors()
+                colors[:, 3] **= 0.3
+                ax.quiver(*r[:self.n_cells, :].T, *r[self.n:, :].T,
+                    length=0.2, color=colors)
 
             # plot collar boundaries
-            c = colored_line_collection(r, 
+            ax.scatter3D(r[self.n_cells:self.n, 0], # pyplot handles the alpha
+                         r[self.n_cells:self.n, 1], # on this one by itself
+                         r[self.n_cells:self.n, 2])
+
+            # plot collar boundaries
+            c = colored_line_collection(r[:self.n, :], 
                 FlexaSheet.collar_pairs(self.neigh_collars), 
                 linecolor, ax,)
             ax.add_collection3d(c)
+
             if ax_given:
                 return(ax)
             
@@ -1072,16 +1152,24 @@ class FlexaSheet(object):
             ax.view_init(40, 20)
 
             # matplotlib won't let me reuse these artists! >:(
-            c = colored_line_collection(r, self.collar_edges, collarcolor, ax,
-                maxalpha=0.1, rev=True)
+            c = colored_line_collection(r[:self.n, :], self.collar_edges, 
+                collarcolor, ax, maxalpha=0.1, rev=True)
             ax.add_collection3d(c)
-            c = colored_line_collection(r, 
+
+            if self.normals == 'free':
+                colors = c.get_edgecolors()
+                colors[:, 3] **= 0.3
+                ax.quiver(*r[:self.n_cells, :].T, *r[self.n:, :].T,
+                    length=0.2, color=colors)
+
+            ax.scatter3D(r[self.n_cells:self.n, 0],
+                         r[self.n_cells:self.n, 1],
+                         r[self.n_cells:self.n, 2])
+
+            c = colored_line_collection(r[:self.n, :], 
                 FlexaSheet.collar_pairs(self.neigh_collars), 
                 linecolor, ax,)
             ax.add_collection3d(c)
-            ax.scatter3D(r[self.n_cells:, 0],
-                         r[self.n_cells:, 1],
-                         r[self.n_cells:, 2])
 
             plt.tight_layout()
         # TODO: add plotter showing phi energy at each cell and 

@@ -15,6 +15,10 @@ def pairs(vals):
         raise ValueError('Must be at least 3 points to traverse in a cycle')
     return([(vals[i], vals[(i + 1) % len(vals)]) for i in range(len(vals))])
 
+def rowwise_dot(a, b, **kwargs):
+    """Returns rowwise dot product between matrices a, b"""
+    return np.sum(a * b, axis=1, **kwargs)
+
 def reindex_list_of_lists(lol, keep=None):
     """Replaces reindexes all the subelements in a list of lists by removing 
     anything not in list keep. Anything not in keep is replaced with -1
