@@ -28,7 +28,7 @@ def make_graphs(name, params):
         s.phi0 = phi0 
         s.psi0 = psi0
         s.ell0 = ell0
-        s.solve_shape((1, 2, k))
+        s.f_equil(k, tol=5e-5, rate=5e-4, plot=False, plotint=200, silent=1)
         
         r = nameroot(name, phi0, psi0, ell0, k)
         
@@ -40,10 +40,10 @@ def make_graphs(name, params):
         s.draw(style='3d')
         plt.savefig(os.path.join(save_dir, '%s_plot.png' % r), dpi=200)
 
-params = np.array([[0.8, 0.8, 1.52, 10], [0.95, 0.8, 1.52, 10]])
+params = [[0.8, 0.8, 1.52, (1, 2, 10)], [0.95, 0.8, 1.52, (1, 2, 10)]]
 make_graphs('hex', params)
 make_graphs('bump', params)
 make_graphs('kink', params)
 
-params[:, 2] = 1.35
+params[0][2] = params[1][2] = 1.35
 make_graphs('hexbig', params)

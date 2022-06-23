@@ -68,5 +68,6 @@ def closest_point(a, b, c, p):
     return(p + c * m)
 
 def closest_point_plane_eq(m, k, p):
-   c = (k - np.dot(m, p)) / np.dot(m, m)
-   return(p + c * m)
+    """Returns the closest point to p on plane defined by m * x = k"""
+    c = (k - np.dot(m, p)) / np.dot(m, m)
+    return(p + c * m)
