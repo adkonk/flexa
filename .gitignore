@@ -56,3 +56,4 @@ examples/sphere/plots/final.png
 examples/dynamics
 examples/grad/*.png
 docs/.main.tex.swp
+examples/ico/dynamics/*.png
