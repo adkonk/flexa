@@ -12,6 +12,7 @@
 \usepackage{bm}
 \newcommand{\e}{\mathcal{E}}
 \newcommand{\bhat}[1]{\hat{\bm{#1}}}
+\newcommand{\bh}[1]{\hat{\bm{#1}}}
 \newcommand{\wh}[1]{\widehat{#1}}
 \usepackage{bbold}
 
@@ -655,7 +656,7 @@ If if inverting a sheet of cells involves flattening it out at the edges, then a
 Let the complete energy function $\e[\{r_\gamma, n_\alpha\}]$ be written in terms of sums over the all interactions in the sheet,
 
 \begin{align}
-	\e[\{r_\gamma, n_\alpha\}] &= \e_\phi + \e_\psi + \e_{\text{spr}} \\
+	\e[\{r_\gamma, n_\alpha\}] &= \e_\phi + \e_\psi + \e_{\text{spr}} \label{eq:energy_disc_simple} \\
 	&= k_\phi \sum_{(\alpha, \rho)} \left( \phi_{(\alpha, \rho)} - \phi_0 \right)^2 + k_\psi \sum_{(\alpha, \beta: \rho, \sigma)} \left( \psi_{\alpha\beta:\rho\sigma} - \psi_0 \right)^2 + k_{\text{spr}} \sum_{(\alpha, \rho)} \left(\left| \vec{r}_\alpha - \vec{r}_\beta \right| - \ell_0 \right)^2 \label{eq:energy_disc}
 \end{align}
 
@@ -670,17 +671,84 @@ Let the complete energy function $\e[\{r_\gamma, n_\alpha\}]$ be written in term
 The gradient described by equations \ref{eq:energy_disc_deriv1} and \ref{eq:energy_disc_deriv2} is solved with derivatives
 
 \begin{align*}
-    \frac{\partial \phi_{(\alpha,\rho)}}{\partial r_{\gamma i}} &= \frac{-1}{\sqrt{1 - (\hat{\bm{n}}_\alpha \cdot \hat{(\alpha\rho)})^2}} \left(\frac{\partial \hat{\bm{n}}_{\alpha j}}{\partial r_{\gamma i}} \hat{(\alpha\rho)}_j + \frac{\partial \hat{(\alpha\rho)}_j}{\partial r_{\gamma i}} \hat{\bm{n}}_{\alpha j} \right) \\
-    \frac{\partial \hat{(\alpha\rho)}_j}{\partial r_{\gamma i}} &= \frac{(\delta_{\gamma\rho} - \delta_{\gamma\alpha})}{|r_\rho - r_\alpha|} \left( \delta_{ij} + \hat{(\alpha\rho)}_i\hat{(\alpha\rho)}_j \right) \\
-    \frac{\partial \psi_{(\alpha, \beta: \sigma, \rho)}}{\partial r_{\gamma i}} &= \frac{-1}{\sqrt{1 - (\hat{\bm{n}}_{\rho\alpha\sigma} \cdot \hat{\bm{n}}_{\rho\beta\sigma}})^2} \left(\frac{\partial \hat{\bm{n}}_{\rho\alpha\sigma j}}{\partial r_{\gamma i}} \hat{\bm{n}}_{\rho\beta\sigma j} + \frac{\partial \hat{\bm{n}}_{\rho\beta\sigma j}}{\partial r_{\gamma i}} \hat{\bm{n}}_{\rho\alpha\sigma j} \right). 
+    \frac{\partial \phi_{(\alpha,\rho)}}{\partial r_{\gamma i}} &= \frac{-1}{\sqrt{1 - (\bh{n}_\alpha \cdot \wh{(\alpha\rho)})^2}} \left(\frac{\partial \bh{n}_{\alpha j}}{\partial r_{\gamma i}} \wh{(\alpha\rho)}_j + \frac{\partial \wh{(\alpha\rho)}_j}{\partial r_{\gamma i}} \bh{n}_{\alpha j} \right) \\
+    \frac{\partial \wh{(\alpha\rho)}_j}{\partial r_{\gamma i}} &= \frac{(\delta_{\gamma\rho} - \delta_{\gamma\alpha})}{|r_\rho - r_\alpha|} \left( \delta_{ij} + \wh{(\alpha\rho)}_i\wh{(\alpha\rho)}_j \right) \\
+    \frac{\partial \psi_{(\alpha, \beta: \sigma, \rho)}}{\partial r_{\gamma i}} &= \frac{-1}{\sqrt{1 - (\bh{n}_{\rho\alpha\sigma} \cdot \bh{n}_{\rho\beta\sigma}})^2} \left(\frac{\partial \bh{n}_{\rho\alpha\sigma j}}{\partial r_{\gamma i}} \bh{n}_{\rho\beta\sigma j} + \frac{\partial \bh{n}_{\rho\beta\sigma j}}{\partial r_{\gamma i}} \bh{n}_{\rho\alpha\sigma j} \right) \\
+    % \frac{\partial \hat{\bm{n}}_{\alpha j}}{\partial r_{\gamma i}} &= \frac{\mathbb{1}_{\gamma\in \text{collars}(\alpha)} - n\delta_{\gamma\alpha}}{\left| \sum_{(\alpha, \rho)} (r_\rho - r_\alpha) \right|} \left(\delta_{ij} - \hat{\bm{n}}_{\alpha i} \hat{\bm{n}}_{\alpha j} \right) \\
+    \frac{\partial \hat{\bm{n}}_{\rho\alpha\sigma j}}{\partial r_{\gamma i}} &= \text{too big see notes}.
 \end{align*}
 
+Since we insist that $|\bh{n}_\alpha| = 1$ for all cells $\alpha$, we wish to solve the constrained minimisation of equation \ref{eq:energy_disc}. One approach to solving this problem numerically is to normalise the cell normal vectors after each step in the direction of the gradient,
 
-
-\begin{align*}	
-    \frac{\partial \hat{\bm{n}}_{\alpha j}}{\partial r_{\gamma i}} &= \frac{\mathbb{1}_{\gamma\in \text{collars}(\alpha)} - n\delta_{\gamma\alpha}}{\left| \sum_{(\alpha, \rho)} (r_\rho - r_\alpha) \right|} \left(\delta_{ij} - \hat{\bm{n}}_{\alpha i} \hat{\bm{n}}_{\alpha j} \right) \\
-    \frac{\partial \hat{\bm{n}}_{\rho\alpha\sigma j}}{\partial r_{\gamma i}} &= \text{too big see notes}
+\begin{align*}
+	\bm{r}_{\gamma}^{i+1} &= \bm{r}_\gamma^i + \lambda \nabla_{\bm{r}_\gamma} \e (\bm{r}_\gamma^i) \\
+	\bh{n}_\alpha^{i+1/2} &= \bh{n}_\alpha^i + \lambda \nabla_{\bh{r}_\alpha} \e (\bh{n}_\alpha^i) \\
+	\bh{n}_\alpha^{i+1} &= \frac{\bh{n}_\alpha^{i+1/2}}{\left|\bh{n}_\alpha^{i+1/2}\right|},
 \end{align*}
+
+\noindent with step rate $\lambda$. Another way to descibe this process would be to replace the update $\bh{n}_\alpha^{i+1/2} \rightarrow \bh{n}_\alpha^{i+1}$ with 
+
+\begin{align*}
+	\bm{n}_\alpha^{i+1} &= \arg\min_{\left| \bm{n}_\alpha \right| = 1} \left| \bm{n}_\alpha - \bm{n}_\alpha^{i+1/2} \right| 
+\end{align*}
+
+\noindent since the nearest point will be unique on the unit sphere for each $\bh{n}_\alpha$. Described in this way, we see that this procedure is exactly projected gradient descent and we expect to achieve a local minimum that adheres to the desired constraints. 
+
+When implemented numerically this procedure fails often. What we find is that adjacent collar nodes pass through each other, which is of course physically unexpected since it would require collar filaments belonging to the same cell to cross over each other. Consequently, we can introduce another energy term $\e_\varphi$ that penalises the deviation $\varphi_{\rho\alpha\sigma} - \varphi_{0\rho\alpha\sigma}$ of collar-cell-collar angles when projected onto the plane defined by the cell normal (Figure \ref{fig:proj_varphi}),
+
+\begin{align*}
+	\e_\varphi &= \sum_{\rho\alpha\sigma} \left(\varphi_{\rho\alpha\sigma} - \varphi_{0\rho\alpha\sigma} \right)^2 \\
+	\varphi_{\rho\alpha\sigma} &= \arccos \left(\frac{\vec{\alpha\rho}_2}{\left|\vec{\alpha\rho}_2\right|} \frac{\vec{\alpha\sigma}_2}{\left|\vec{\alpha\sigma}_2\right|}\right) \\
+	\vec{\alpha\rho}_2 &= \left(\vec{r}_\rho - \vec{r}_\alpha \right) - \left[\left(\vec{r}_\rho - \vec{r}_\alpha \right)\cdot \bh{n}_\alpha \right] \bh{n}_\alpha.
+\end{align*}
+
+\begin{figure}
+	\centering
+	\includegraphics[width=0.6\textwidth]{figures/proj_varphi.jpg}
+	\caption{Projected collar angle $\varphi_{\rho\alpha\sigma}$ defined by projecting collar nodes onto the plane defined by the cell normal and position.}
+	\label{fig:proj_varphi}
+\end{figure}
+
+To simplify this gradient we can introduce the generic function
+
+\begin{align*}
+	\angle(\vec{a}, \vec{b}) &= \arccos \left(\frac{\vec{a}}{|\vec{a}|} \cdot \frac{\vec{b}}{|\vec{b}|}\right)
+\end{align*}
+
+defined in terms of vectors $\vec{a}, \vec{b}$, which are both functions of a vector $\vec{x}$. We can write then that 
+
+\begin{align*}
+	\frac{\partial \angle}{\partial \vec{x}_i} &= \frac{-1}{\sqrt{1 - (\hat{a}\cdot\hat{b})^2}} \left(\frac{\partial \hat{a}_j}{\partial \vec{x}_i} \hat{b}_j + \hat{a}_j \frac{\partial \hat{b}_j}{\partial \vec{x}_i} \right) \\
+	\frac{\partial \hat{a}_j}{\partial \vec{x}_i} &= \frac{1}{\left|\vec{a} \right|} \left[\frac{\partial \vec{a}_j}{\partial \vec{x}_i} - \left( \frac{\partial \vec{a}_k}{\partial\vec{x}_i} \hat{a}_k \right) \hat{a}_j \right].
+\end{align*}
+
+\noindent Since 
+
+\begin{align*}
+	\frac{\partial \vec{\alpha\rho}_{2j}}{\partial \vec{r}_{\gamma i}} &= \left(\delta_{\gamma \rho} - \delta_{\gamma \alpha} \right) \left(\delta_{ij} - n_{\alpha i} n_{\alpha j} \right), \\
+	\frac{\partial \hat{\alpha\rho}_{2j}}{\partial \vec{r}_{\gamma i}} &= \frac{1}{|\vec{\alpha\rho}_2|} \left(\delta_{ij} - n_{\alpha i} n_{\alpha j} - \hat{\alpha\rho}_{2i} \hat{\alpha\rho}_{2j} + (\hat{\alpha\rho}_2 \cdot \bh{n}_\alpha) n_{\alpha i} \hat{\alpha\rho}_{2j} \right).
+\end{align*}
+
+\noindent This lets us solve for the gradient in terms of coordinate vectors 
+
+\begin{align*}
+	\frac{\partial \e_\varphi}{\partial \vec{r}_\gamma} &= 2 \sum_{\rho\alpha\sigma} \frac{-(\varphi_{\rho\alpha\sigma} - \varphi_{0\rho\alpha\sigma})}{\sqrt{1-(\hat{\alpha\rho}_2 \cdot \hat{\alpha\sigma}_2)^2}} \Big[ \frac{\delta_{\gamma\rho} - \delta_{\gamma\alpha}}{|\vec{\alpha\rho}_2|} \left(\hat{\alpha\sigma}_2 - (\hat{\alpha\sigma}_2 \cdot \bh{n}_\alpha)\bh{n}_\alpha - (\hat{\alpha\rho}_2\cdot\hat{\alpha\sigma}_2) \hat{\alpha\rho}_2 + (\hat{\alpha\rho}_2\cdot\hat{\alpha\sigma}_2)(\hat{\alpha\rho}_2\cdot\bh{n}_\alpha)\bh{n}_\alpha \right) \\
+	&\qquad\qquad\qquad\qquad\qquad\qquad \frac{\delta_{\gamma\sigma} - \delta_{\gamma\alpha}}{|\vec{\alpha\sigma}_2|} \left(\hat{\alpha\rho}_2 - (\hat{\alpha\rho}_2 \cdot \bh{n}_\alpha)\bh{n}_\alpha - (\hat{\alpha\sigma}_2\cdot\hat{\alpha\rho}_2) \hat{\alpha\sigma}_2 + (\hat{\alpha\sigma}_2\cdot\hat{\alpha\rho}_2)(\hat{\alpha\sigma}_2\cdot\bh{n}_\alpha)\bh{n}_\alpha \right) \Big]
+\end{align*}
+
+Likewise, we use 
+
+\begin{align*}
+	\frac{\partial\vec{\alpha\rho}_2}{\partial n_{\beta i}} &= -\delta_{\alpha\beta} \left(\vec{\alpha\rho}_i \hat{n}_{\alpha j} - (\vec{\alpha\rho} \cdot \bh{n}_\alpha) \delta_{ij} \right)
+\end{align*}
+
+\noindent to write the gradient of $\e_\varphi$ with respect to the cell normal vectors
+
+\begin{align*}
+	\frac{\partial \e_\varphi}{\partial \bh{n}_\beta} &= 2 \sum_{\rho\alpha\sigma} \frac{\delta_{\alpha\beta}(\varphi_{\rho\alpha\sigma} - \varphi_{0\rho\alpha\sigma})}{\sqrt{1 - (\hat{\alpha\rho}_2 \cdot \hat{\alpha\sigma}_2)^2}} \left[(\vec{\alpha\rho} \cdot \bh{n}_\alpha + (\hat{\alpha\sigma}_2 \cdot \bh{n}_\alpha)\vec{\alpha\rho} + (\vec{\alpha\sigma} \cdot \bh{n}_\alpha) \hat{\alpha\rho}_2 + (\hat{\alpha\rho}_2 \cdot \bh{n}_\alpha) \vec{\alpha\sigma} \right].
+\end{align*}
+
+Adding the gradient of $\e_\varphi$ to the total energy equation \ref{eq:energy_disc_simple} with constant $k_\phi$ proved sufficient in numerics to prevent sudden increases in energy resulting from collar nodes crossing each other. 
 
 \begin{comment}
 \newpage
