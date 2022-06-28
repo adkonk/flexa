@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import networkx as nx
 import os
 from inspect import stack
 
@@ -50,6 +51,11 @@ def spiral_inds(X):
         pos += dir[dir_i]
     
     return(inds)
+
+def bfs_inds(X):
+    G = nx.grid_2d_graph(X.shape[0], X.shape[1])
+    source = (round(X.shape[0] / 2), round(X.shape[1] / 2))
+    return(nx.bfs_edges(G, source=source))
 
 def meshplotter(x, y, data, path_func, title='', cbarlabel='', 
         log=False, vmin=None, vmax=None):
