@@ -15,7 +15,7 @@ def initial_sim(s, name, ell0, k, dir_path=save_dir):
     print('Initial simulation for %s' % name)
     fpath = file_path(dir_path, name, s.phi0, s.psi0, ell0, k)
     if os.path.exists(fpath):
-        return 0
+        return FlexaSheet.load(fpath)
     s.f_equil(k, tol=1e-5, rate=5e-4, plot=False, plotint=1e3, silent=0)
     s.save(fpath)
 
