@@ -51,20 +51,6 @@ psis = np.linspace(-rang, rang, n) + 0.65
 phi0 = phis[init_i]
 psi0 = psis[init_i]
 
-def invert_sheet(s):
-    s_inv = copy.deepcopy(s)
-    s_inv.x[:(3 * s_inv.n_cells)] *= 0.5 # move the cells inside the sheet
-    s_inv.x[(3 * s_inv.n):] *= -1 # flip the normals
-    s_inv.s0 = s_inv.sector_angles(s_inv.x.reshape(-1, 3)) # correct angles
-    return(s_inv)
-
-rang = 0.4
-n = 21
-phis = np.linspace(-rang, rang, n) + 0.55
-psis = np.linspace(-rang, rang, n) + 0.65
-phi0 = phis[round(n / 2)]
-psi0 = psis[round(n / 2)]
-
 name = 'ico'
 name_inv = 'icor'
 v, f = ico(3, radius=2, angle=2*np.pi/5)
@@ -112,12 +98,35 @@ for p in paths:
         s = sheet_from_path(p, n, phis, psis, ell0, k, save_dir)
         energies[n][p[1][1], p[1][0]] = s.energy(s.x, k)
 
-def makeplot(name, energies):
+def makeplot(name, energies, vmin=None, vmax=None):
     plt.figure(figsize=(12,12))
     meshplotter(phis, psis, energies,
         path_func=lambda phi, psi: file_path(save_dir, name, phi, psi, ell0, k),
-        title='energies', cbarlabel='energy', log=True)
+        title='energies', cbarlabel='energy', log=True, vmin=vmin, vmax=vmax)
     plt.savefig(os.path.join(save_dir, 'landscape_%s.png' % name), dpi=200)
 
+def makeplot2(name1, name2, energies1, energies2):
+    plt.figure(figsize=(12,12))
+    meshplotter(phis, psis,
+        np.where(energies1 < energies2, energies1, energies2),
+        path_func=lambda phi, psi: \
+            file_path(save_dir, name1, phi, psi, ell0, k),
+        title='energies', cbarlabel='energy', log=True)
+    fig = plt.gcf()
+    ax = fig.get_axes()[0]
+    x, y = np.meshgrid(phis, psis)
+    which = energies1 < energies2
+    ax.plot(x[which], y[which], 'r.', ms=10)
+    ax.plot(x[np.logical_not(which)], y[np.logical_not(which)], '.',
+        color='orange', ms=10)
+    plt.savefig(os.path.join(save_dir, 'landscape_%s_merge.png' % \
+        (name1 + name2)), dpi=200)
+
+vmin = np.amin([np.amin(x) for x in energies.values()])
+vmax = np.amax([np.amax(x) for x in energies.values()])
+
 for n in names:
-    makeplot(n, energies[n])
+    makeplot(n, energies[n], vmin=vmin, vmax=vmax)
+
+makeplot2('ico', 'icor', energies['ico'], energies['icor'])
+makeplot2('ico3', 'ico3r', energies['ico3'], energies['ico3r'])
