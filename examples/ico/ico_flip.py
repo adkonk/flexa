@@ -18,24 +18,24 @@ def invert_sheet(s):
     return(s_inv)
 
 name = 'ico'
-phi0 = 0.31
-psi0 = 0.65
+phi0 = 0.75
+psi0 = 0.49
 
 v, f = ico(3, radius=2, angle=2*np.pi/5)
 
 s = FlexaSheet.facegen(v, f, z=0.5, ref='ori',
-    phi0=phi0, psi0=psi0, 
+    phi0=phi0, psi0=psi0,
     ell0=1.5, normals='free', silent=1)
 if name[-1] == 'r':
     s = invert_sheet(s)
 
 ell0 = s.ell0
-k_orig = (1, 2, 10)
+k_orig = (1, 2, 5)
 k_temp = (1, 2, 0.1)
 
-m = s.f_equil(k_orig, tol=1e-5, rate=5e-5, plot=True, plotint=50, silent=0, 
+m = s.f_equil(k_orig, tol=1e-5, rate=5e-5, plot=True, plotint=50, silent=0,
     plotdir=save_dir)
-m = s.f_equil(k_temp, tol=1e-5, rate=5e-5, plot=True, plotint=50, silent=0, 
+m = s.f_equil(k_temp, tol=1e-5, rate=1e-4, plot=True, plotint=50, silent=0,
     plotdir=save_dir, m=m)
-m = s.f_equil(k_orig, tol=1e-5, rate=5e-5, plot=True, plotint=50, silent=0, 
+m = s.f_equil(k_orig, tol=1e-5, rate=5e-5, plot=True, plotint=50, silent=0,
     plotdir=save_dir, m=m)
