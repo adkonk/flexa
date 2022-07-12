@@ -9,10 +9,7 @@ from examples.utils import save_folder_path, file_path, bfs_inds, \
 
 import copy
 
-# save_dir = save_folder_path('landscape', make=True)
-save_dir = '/local/scratch/public/ak2351/landscape'
-if not os.path.exists(save_dir):
-    os.mkdir(save_dir)
+save_dir = save_folder_path('landscape', make=True)
 
 def initial_sim(s, name, ell0, k, dir_path=save_dir):
     print('Initial simulation for %s' % name)
@@ -65,20 +62,39 @@ ell0 = 0.5
 energies = np.zeros((psis.size, phis.size))
 paths = bfs_inds(energies)
 
-def traverse_landscape(initial_sheet, name):
-    pi = 0
-    print('initial sheet simulation for %s' % name)
-    energies[init_i, init_i] = initial_sim(initial_sheet, name, \
-            initial_sheet.ell0, k, save_dir)
+def traverse_landscape(initial_sheet, name, c=0):
+    if c == 0:
+        initial_sim(initial_sheet, name, initial_sheet.ell0, k, save_dir)
+        x = 1
+        paths = []
+        while init_i + x < n:
+            paths = paths + [((init_i, init_i + x - 1), 
+                (init_i, init_i + x))]
+            paths = paths + [((init_i, init_i - x + 1), 
+                (init_i, init_i - x))]  
+            x += 1
+    if c > 0:
+        x = 1
+        paths = []
+        while init_i + x < n:
+            paths = paths + [((init_i + x - 1, c), (init_i + x, c))]
+            x += 1
+    if c < 0:
+        x = 1
+        paths = []
+        while init_i + x < n:
+            paths = paths + [((init_i - x + 1, -c), (init_i - x, -c))]    
+            x += 1
 
-    n_sheets = energies.size
+    pi = 0
+    n_sheets = len(paths)
     for p in paths:
         print('\nSheet %d out of %d with phi0=%0.2f, psi0=%0.2f' % \
             (pi + 1, n_sheets, phis[p[1][0]], psis[p[1][1]]))
         pi += 1
         s = sheet_from_path(p, name, phis, psis, ell0, k, save_dir)
         energies[p[1][1], p[1][0]] = s.energy(s.x, k)
-    np.save(os.path.join(save_dir, 'energies_%s.npy' % name))
+    np.save(os.path.join(save_dir, 'energies_%s_%d.npy' % (name, c)))
 
 def relax_sheet(name, phi, psi, ell0, k_orig, k_temp, dir_path=save_dir):
     fpath = file_path(dir_path, name, phi, psi, ell0, k_orig)

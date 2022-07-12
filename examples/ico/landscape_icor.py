@@ -1,4 +1,5 @@
 import numpy as np
+import sys
 
 from flexa.FlexaSheet import FlexaSheet
 from flexa.lattice import ico
@@ -12,5 +13,5 @@ s = FlexaSheet.facegen(v, f, z=0.5, ref='ori',
     normals='free', silent=1)
 s = invert_sheet(s)
 
-traverse_landscape(s, name)
+traverse_landscape(s, name, c=int(sys.argv[1])
 
